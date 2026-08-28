@@ -217,10 +217,25 @@ the executable, because PyInstaller unpacks to a temporary directory that is
 deleted on exit — writing memory and logs there would silently lose all of it
 between runs.
 
-Two honest caveats. The full build is large, mostly `googleapiclient` (100 MB)
-and the voice stack (about 210 MB); `--lite` drops both. And it is not
-code-signed, so Windows shows an "unknown publisher" warning — the generated
+Measured sizes: the full build is a **434 MB** folder, `--lite` is **100 MB**
+(the exe itself is 15–20 MB; the rest is bundled libraries). The difference is
+`googleapiclient` at 100 MB and the voice stack at about 210 MB.
+
+If something looks broken on someone else's machine:
+
+```bash
+JARVIS.exe --selftest
+```
+
+That writes `selftest.txt` next to the exe listing every subsystem and whether
+it loaded. A windowed build has no console, so without it a bundling mistake
+is invisible until a recipient presses a button that quietly does nothing.
+
+One caveat worth stating plainly: the exe is **not code-signed**, so Windows
+SmartScreen shows an "unknown publisher" warning. The generated
 `READ ME FIRST.txt` tells your recipient to click More info, then Run anyway.
+Signing requires a certificate that costs real money; without it, expect
+anyone cautious to be suspicious, and rightly so.
 
 ---
 

@@ -75,7 +75,91 @@ def _relaunch_under_venv() -> int | None:
     return 0
 
 
+def _selftest() -> int:
+    """Import everything and write a report next to the executable.
+
+    A windowed build has no console, so a bundling mistake is invisible until
+    a recipient presses a button that quietly does nothing. This forces every
+    optional subsystem to import and records what happened, which is also the
+    fastest way to diagnose someone else's machine: "run JARVIS.exe
+    --selftest and send me the file".
+    """
+    import platform
+    from datetime import datetime
+
+    checks = [
+        ("customtkinter", "the window"),
+        ("pystray", "tray icon"),
+        ("PIL", "icons and screenshot scaling"),
+        ("google.genai", "the agent"),
+        ("httpx", "web"),
+        ("bs4", "reading pages"),
+        ("psutil", "system stats"),
+        ("pyautogui", "mouse and keyboard"),
+        ("pygetwindow", "window control"),
+        ("pyperclip", "clipboard"),
+        ("pynput", "hotkeys"),
+        ("mss", "screen capture"),
+        ("win32api", "media keys"),
+        ("apscheduler", "scheduled jobs"),
+        ("sqlite3", "memory and quota"),
+        ("faster_whisper", "speech to text"),
+        ("ctranslate2", "speech to text engine"),
+        ("sounddevice", "microphone and speaker"),
+        ("piper", "text to speech"),
+        ("onnxruntime", "text to speech engine"),
+        ("av", "audio decoding"),
+        ("googleapiclient", "calendar and mail"),
+    ]
+
+    lines = [
+        "JARVIS self-test",
+        datetime.now().astimezone().isoformat(timespec="seconds"),
+        f"{platform.system()} {platform.release()}  python {sys.version.split()[0]}",
+        f"frozen: {getattr(sys, 'frozen', False)}",
+        "",
+    ]
+    failed = 0
+    for module, purpose in checks:
+        try:
+            __import__(module)
+            lines.append(f"  ok    {module:18} {purpose}")
+        except Exception as exc:  # noqa: BLE001
+            failed += 1
+            lines.append(f"  FAIL  {module:18} {purpose} -- {type(exc).__name__}: {exc}")
+
+    try:
+        from jarvis import config
+        from jarvis.tools import registry
+
+        lines += [
+            "",
+            f"  data directory: {config.ROOT}",
+            f"  tools registered: {len(registry)}",
+            f"  api key present: {config.api_key_present()}",
+        ]
+    except Exception as exc:  # noqa: BLE001
+        failed += 1
+        lines.append(f"  FAIL  jarvis core -- {type(exc).__name__}: {exc}")
+
+    lines += ["", f"{failed} failure(s)" if failed else "all subsystems available"]
+    report = "\n".join(lines)
+
+    for target in (Path(sys.executable).parent / "selftest.txt", ROOT / "selftest.txt"):
+        try:
+            target.write_text(report, encoding="utf-8")
+            break
+        except OSError:
+            continue
+
+    print(report)
+    return 1 if failed else 0
+
+
 def main() -> int:
+    if "--selftest" in sys.argv:
+        return _selftest()
+
     missing = []
     for module, purpose in (
         ("customtkinter", "the window"),
