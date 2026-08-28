@@ -28,14 +28,43 @@ Notes from making this actually work:
 """
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-DIST = ROOT / "dist"
-BUILD = ROOT / "build"
+
+
+def _output_root() -> Path:
+    """Somewhere to build that OneDrive is not watching.
+
+    This project lives under OneDrive, and OneDrive takes handles on files it
+    is syncing. PyInstaller writes thousands of files and then deletes them,
+    which collides with that constantly: two builds here died with
+    "Access is denied: build\\JARVIS\\localpycs" partway through, and the
+    second left a stale exe in dist that looked like a fresh success.
+
+    Building into %LOCALAPPDATA% avoids the locking entirely, and avoids
+    uploading several hundred megabytes of disposable build output to the
+    user's cloud storage -- which is the more expensive mistake of the two.
+
+    --here forces the old in-project behaviour.
+    """
+    if "--here" in sys.argv:
+        return ROOT
+    base = os.getenv("LOCALAPPDATA") or tempfile.gettempdir()
+    out = Path(base) / "JARVIS-build"
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+OUT_ROOT = _output_root()
+DIST = OUT_ROOT / "dist"
+BUILD = OUT_ROOT / "build"
 
 # Imported lazily or by name at runtime, so PyInstaller cannot see them.
 HIDDEN = [
@@ -66,9 +95,42 @@ EXCLUDE = [
 ]
 
 
+def _clear_workspace() -> None:
+    """Remove build and dist, working around Windows file locking.
+
+    A previous JARVIS.exe still running holds its own folder open, and
+    OneDrive keeps handles on files it is syncing. Either makes PyInstaller
+    die with "Access is denied" partway through -- and it did, leaving a stale
+    exe in dist that looked like a fresh successful build. Stopping the
+    process and retrying beats debugging that twice.
+    """
+    subprocess.run(
+        ["taskkill", "/F", "/IM", "JARVIS.exe"],
+        capture_output=True,
+        check=False,
+    )
+
+    for folder in (BUILD, DIST):
+        for attempt in range(4):
+            if not folder.exists():
+                break
+            try:
+                shutil.rmtree(folder)
+                break
+            except (OSError, PermissionError):
+                if attempt == 3:
+                    print(
+                        f"warning: could not fully remove {folder}. If the build "
+                        "fails, close anything using it and try again."
+                    )
+                time.sleep(1.5)
+
+
 def build(lite: bool = False, onefile: bool = False) -> int:
     icon = ROOT / "jarvis.ico"
     name = "JARVIS"
+
+    _clear_workspace()
 
     args = [
         sys.executable, "-m", "PyInstaller",

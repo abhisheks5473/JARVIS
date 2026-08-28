@@ -201,7 +201,13 @@ python build_exe.py            # everything, voice included
 python build_exe.py --lite     # no voice or Google Workspace, much smaller
 ```
 
-That produces `dist/JARVIS/` — zip it and send it. The recipient needs
+The result lands in `%LOCALAPPDATA%\JARVIS-build\dist\JARVIS` — zip that folder
+and send it. It builds outside the project deliberately: this repository sits
+inside OneDrive, and OneDrive takes handles on files while syncing, which
+killed two builds partway through with "Access is denied" and left a stale exe
+behind that looked like a fresh one. Building there also avoids uploading
+several hundred megabytes of disposable output to your cloud quota. Use
+`--here` if you want the old in-project behaviour. The recipient needs
 **nothing** installed: no Python, no pip, no virtual environment. Everything is
 bundled at build time, which is deliberate: asking someone you sent an app to
 run `pip install` is asking them to give up.
