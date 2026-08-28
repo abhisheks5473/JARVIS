@@ -1,0 +1,19 @@
+# Secrets. The whole reason this file exists.
+.env
+data/google_token.json
+*.credentials.json
+client_secret*.json
+
+# Runtime state
+.venv/
+data/
+logs/
+workspace/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Editors
+.vscode/
+.idea/
+.DS_Store
