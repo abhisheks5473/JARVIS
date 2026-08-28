@@ -39,6 +39,42 @@ def _fatal(message: str) -> int:
     return 1
 
 
+def _relaunch_under_venv() -> int | None:
+    """Start again under the project's own interpreter, then step aside.
+
+    The dependencies live in .venv, so any other Python fails on import. Rather
+    than explaining that in a dialog and making it the reader's problem, this
+    re-runs itself with the right interpreter and exits. It means `python
+    app.py`, a double-click, and a shortcut all work the same way without
+    anyone having to activate anything.
+
+    pythonw is used so no console window appears. The guard variable stops an
+    infinite relaunch if the venv is itself broken.
+    """
+    import os
+    import subprocess
+
+    if os.environ.get("JARVIS_RELAUNCHED") == "1":
+        return None  # already tried; fall through to the error dialog
+
+    pythonw = ROOT / ".venv" / "Scripts" / "pythonw.exe"
+    if not pythonw.exists() or Path(sys.executable).parent == pythonw.parent:
+        return None
+
+    env = dict(os.environ, JARVIS_RELAUNCHED="1")
+    try:
+        subprocess.Popen(
+            [str(pythonw), str(ROOT / "app.py")],
+            cwd=str(ROOT),
+            env=env,
+            close_fds=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except OSError:
+        return None
+    return 0
+
+
 def main() -> int:
     missing = []
     for module, purpose in (
@@ -52,15 +88,24 @@ def main() -> int:
             missing.append(f"{module} ({purpose})")
 
     if missing:
+        # Wrong interpreter is the usual cause, and it is fixable without
+        # bothering anyone about it.
+        relaunched = _relaunch_under_venv()
+        if relaunched is not None:
+            return relaunched
+
         venv = ROOT / ".venv" / "Scripts" / "pythonw.exe"
         return _fatal(
             "Missing packages:\n  "
             + "\n  ".join(missing)
             + "\n\n"
             + (
-                f"You are running the wrong Python.\nUse:\n  {venv} app.py"
+                "The virtual environment exists but could not be used.\n"
+                f"Try running:\n  {venv} app.py"
                 if venv.exists()
-                else "Run: pip install -r requirements.txt"
+                else "Set up the environment first:\n"
+                "  python -m venv .venv\n"
+                "  .venv\\Scripts\\pip install -r requirements.txt"
             )
         )
 

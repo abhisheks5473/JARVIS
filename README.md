@@ -152,8 +152,23 @@ on every change.
 
 ## The app
 
-`JARVIS.vbs` starts it with no console window at all. `python make_shortcut.py`
-puts it in the Start menu; add `--startup` to launch it at login.
+```bash
+python make_shortcut.py
+```
+
+That puts **JARVIS** on your Desktop and in the Start menu. Double-click it and
+the app opens — no terminal, no console window, no venv to activate. Add
+`--startup` to launch it at login.
+
+Note that you cannot double-click `app.py` itself, and that is a Windows fact
+rather than a project one: a default install has no association for `.py` at
+all, so double-clicking one opens the "how do you want to open this file?"
+dialog. Where an association does exist it points at the system Python, which
+does not have this project's dependencies. The shortcut runs `JARVIS.vbs`,
+which runs the venv's `pythonw` — correct interpreter, no console, every time.
+
+If you do run `python app.py` with the wrong interpreter, it notices and
+re-launches itself under the right one rather than lecturing you about it.
 
 Closing the window hides it to the system tray — the assistant keeps running,
 scheduled jobs keep firing, and push-to-talk still works from any application.
@@ -169,9 +184,12 @@ never freezes mid-turn.
 The one approval dialog left is the taint guard, and it defaults to Deny —
 Escape refuses, so the reflexive keystroke is the safe one.
 
+```bash
+python app.py
 ```
-python app.py       # same app, with a console for debugging
-```
+
+Same app, and it will relaunch itself under the venv if you started it with
+the wrong Python.
 
 ---
 
