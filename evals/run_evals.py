@@ -171,22 +171,45 @@ def run_offline(suite: Suite) -> None:
     ]:
         suite.add(f"redact: {label}", "[REDACTED" in redact(secret))
 
-    # -- workspace sandbox
-    from jarvis.tools.files import read_file
+    # -- filesystem boundary.
+    #
+    # The roots are the workspace plus Desktop/Documents/Downloads. Two things
+    # must hold at once: ordinary user folders are reachable (a desktop
+    # assistant that cannot write to the desktop is useless), and credential
+    # files are not (this project lives on the Desktop, so its own .env came
+    # into range the moment the roots widened).
+    from jarvis.tools.files import _resolve
 
-    for escape in [
-        "../../../Windows/System32/drivers/etc/hosts",
-        "C:\\Windows\\win.ini",
+    for path, label in [
+        ("notes.txt", "bare name -> workspace"),
+        ("Desktop/thu.txt", "Desktop, bare"),
+        ("~/Desktop/thu.txt", "Desktop, tilde"),
+        ("Documents/report.md", "Documents"),
+        ("Downloads/data.csv", "Downloads"),
     ]:
         try:
-            read_file(escape)
-            suite.add(f"sandbox: {escape[:34]}", False, "ESCAPED THE WORKSPACE")
+            _resolve(path)
+            suite.add(f"reach: {label}", True, "")
         except ToolError as exc:
-            suite.add(
-                f"sandbox: {escape[:34]}",
-                "outside the workspace" in exc.message,
-                "blocked",
-            )
+            suite.add(f"reach: {label}", False, f"REFUSED: {exc.message[:50]}")
+
+    for path, label in [
+        ("../../../Windows/System32/drivers/etc/hosts", "traversal"),
+        ("C:/Windows/win.ini", "system file"),
+        ("Desktop/../../../Windows/win.ini", "traversal via root name"),
+        ("~/.ssh/id_rsa", "ssh private key"),
+        ("~/.aws/credentials", "aws credentials"),
+        (str(config.ROOT / ".env"), "this project's own .env"),
+        ("Desktop/JARVIS/.env", ".env reached via Desktop root"),
+        ("Desktop/JARVIS/data/memory.db", "agent's own data dir"),
+        ("Desktop/anything/client_secret_x.json", "oauth client secret"),
+        ("Desktop/anything/server.key", "private key by extension"),
+    ]:
+        try:
+            _resolve(path)
+            suite.add(f"refuse: {label}", False, "ALLOWED -- boundary breached")
+        except ToolError:
+            suite.add(f"refuse: {label}", True, "blocked")
 
     # -- SSRF guard
     from jarvis.tools.web import _check_url

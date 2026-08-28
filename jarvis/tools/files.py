@@ -1,8 +1,18 @@
-"""Files, sandboxed to one folder. Always.
+"""Files, confined to a short list of folders.
 
-Every path the model supplies is resolved and checked against the workspace
-root before anything opens it. The check is on the *resolved* path, so
+Every path the model supplies is resolved and checked against the allowed
+roots before anything opens it. The check is on the *resolved* path, so
 "../../etc/passwd", a symlink, and an absolute path all fail the same way.
+
+The roots are the workspace plus your ordinary document folders (Desktop,
+Documents, Downloads by default). A single workspace was the original design
+and it was too narrow: "put a file on my desktop" is most of what a desktop
+assistant is asked to do, and refusing it made the tool useless for the job.
+
+Widening the roots created a new problem -- this project lives on the Desktop,
+so its own .env came into range. Hence the denylist in `_is_sensitive`, which
+is independent of the roots and refuses credential files and protected
+directories wherever they appear.
 
 Deletion never destroys. `delete_path` moves into a recoverable trash which a
 scheduled job empties after thirty days.
@@ -10,6 +20,7 @@ scheduled job empties after thirty days.
 from __future__ import annotations
 
 import shutil
+from fnmatch import fnmatch
 from pathlib import Path
 
 from .. import config
@@ -26,45 +37,137 @@ TEXT_SUFFIXES = {
 }
 
 
-def _resolve(path: str) -> Path:
-    """Resolve `path` inside the workspace, or refuse.
+def _is_sensitive(candidate: Path) -> str | None:
+    """Return a reason if this path must stay unreachable, else None.
 
-    Resolution happens first and the comparison is on the real path, so
-    traversal and symlink escapes are caught by the same check.
+    Allowing Desktop as a root would otherwise expose this project's own .env,
+    since JARVIS lives on the Desktop. This denylist is checked on every
+    access and is independent of which root the file sits under.
     """
-    root = config.WORKSPACE.resolve()
-    candidate = (
-        Path(path).resolve() if Path(path).is_absolute() else (root / path).resolve()
-    )
+    name = candidate.name.lower()
+    for pattern in config.SENSITIVE_FILE_PATTERNS:
+        if fnmatch(name, pattern.lower()):
+            return f"{candidate.name} is a credential file"
 
-    if candidate != root and root not in candidate.parents:
+    parts = {p.lower() for p in candidate.parts}
+    for blocked in config.SENSITIVE_DIR_NAMES:
+        if blocked.lower() in parts:
+            return f"{blocked} is a protected directory"
+
+    # The agent's own state is not the agent's business.
+    try:
+        if config.DATA_DIR.resolve() in candidate.parents:
+            return "that is the private data directory"
+    except OSError:
+        pass
+    return None
+
+
+def _anchor(path: str, roots: list[Path], workspace: Path) -> Path:
+    """Turn whatever the model wrote into a real absolute path.
+
+    Models say "~/Desktop/notes.txt", "Desktop/notes.txt", and
+    "C:/Users/abhis/Desktop/notes.txt" interchangeably. On a machine where
+    OneDrive has redirected the Desktop, only one of those is a real location
+    and the other two point at a folder that does not exist. Rather than
+    refuse on a technicality, a leading known-folder name is matched by name
+    against the allowed roots and re-anchored to wherever that folder actually
+    lives.
+
+    This cannot widen access: the result is still checked against `roots` by
+    the caller, and re-anchoring only ever maps onto a root that is already
+    allowed.
+    """
+    cleaned = path.strip().strip('"').replace("\\", "/").lstrip("~").lstrip("/")
+    parts = [p for p in cleaned.split("/") if p not in ("", ".")]
+
+    if parts:
+        head = parts[0].lower()
+        for root in roots:
+            if root.name.lower() == head:
+                return (root.joinpath(*parts[1:]) if len(parts) > 1 else root).resolve()
+
+    raw = Path(path).expanduser()
+    if raw.is_absolute():
+        resolved = raw.resolve()
+        # An absolute path under the home directory naming a known folder that
+        # does not exist there is almost certainly a redirected folder.
+        try:
+            relative = resolved.relative_to(Path.home())
+        except ValueError:
+            return resolved
+        if relative.parts:
+            head = relative.parts[0].lower()
+            for root in roots:
+                if root.name.lower() == head and not resolved.exists():
+                    return root.joinpath(*relative.parts[1:]).resolve()
+        return resolved
+
+    return (workspace / raw).resolve()
+
+
+def _resolve(path: str) -> Path:
+    """Resolve `path` against the allowed roots, or refuse.
+
+    Resolution happens first and every comparison is on the real path, so
+    traversal ("../../Windows") and symlink escapes are caught by the same
+    check. Relative paths are interpreted against the workspace, which keeps
+    the common case short.
+    """
+    roots = [r.resolve() for r in config.ALLOWED_ROOTS]
+    workspace = config.WORKSPACE.resolve()
+
+    candidate = _anchor(path, roots, workspace)
+
+    inside = any(candidate == root or root in candidate.parents for root in roots)
+    if not inside:
+        readable = ", ".join(r.name or str(r) for r in roots)
         raise ToolError(
-            "path is outside the workspace",
+            f"path is outside the folders I may touch: {candidate}",
             hint=(
-                f"only paths under {root.name}/ are reachable; give a path "
-                "relative to the workspace, such as notes/todo.txt"
+                f"I can reach {readable}. Give a path inside one of those, or "
+                "a bare filename, which lands in the workspace."
+            ),
+        )
+
+    reason = _is_sensitive(candidate)
+    if reason:
+        raise ToolError(
+            f"refusing to touch that path -- {reason}",
+            hint=(
+                "credential files and protected directories are permanently "
+                "off-limits; tell the user rather than trying another route"
             ),
         )
     return candidate
 
 
 def _relative(path: Path) -> str:
-    try:
-        return str(path.relative_to(config.WORKSPACE.resolve()))
-    except ValueError:
-        return str(path)
+    """Shortest readable form: relative to whichever root contains it."""
+    for root in config.ALLOWED_ROOTS:
+        try:
+            rel = path.relative_to(root.resolve())
+        except ValueError:
+            continue
+        return str(rel) if root == config.WORKSPACE else f"{root.name}/{rel}"
+    return str(path)
 
 
 @tool(group="files", untrusted_output=True)
 def read_file(path: str, max_bytes: int = 8000) -> dict:
-    """Read a text file from the workspace folder.
+    """Read a text file.
 
-    Use for source code, notes, configuration and data files. Do not use it
-    for binaries or images. Do not use it just to check whether a file exists
+    You can reach the workspace, the Desktop, Documents and Downloads. Use for
+    source code, notes, configuration and data files. Do not use it for
+    binaries or images, and do not use it just to check whether a file exists
     -- call list_directory for that, which is cheaper and will not fail.
 
+    Credential files such as .env or SSH keys are permanently refused. If you
+    hit that, say so; there is no alternative route.
+
     Args:
-        path: Path relative to the workspace folder, e.g. notes/todo.txt
+        path: A bare name lands in the workspace. Otherwise give a folder,
+            e.g. "Desktop/notes.txt" or "Documents/report.md".
         max_bytes: Stop after this many bytes. Raise it only if the file was
             genuinely truncated and you need the rest.
     """
@@ -101,13 +204,16 @@ def read_file(path: str, max_bytes: int = 8000) -> dict:
 
 @tool(group="files")
 def write_file(path: str, content: str, mode: str = "overwrite") -> dict:
-    """Write text to a file in the workspace folder.
+    """Write text to a file.
 
-    Read the file first if it already exists -- never overwrite a path you
-    have not seen. Requires the user's approval before it runs.
+    You can write to the workspace, the Desktop, Documents and Downloads, so
+    "make a file on my desktop" is something you can simply do. Read the file
+    first if it already exists -- never overwrite a path you have not seen.
+    Requires the user's approval before it runs.
 
     Args:
-        path: Path relative to the workspace folder.
+        path: A bare name lands in the workspace. Otherwise give a folder,
+            e.g. "Desktop/notes.txt".
         content: The full text to write.
         mode: Either overwrite or append.
     """
@@ -134,13 +240,14 @@ def write_file(path: str, content: str, mode: str = "overwrite") -> dict:
 
 @tool(group="files")
 def list_directory(path: str = ".", pattern: str = "*") -> dict:
-    """List the contents of a workspace directory.
+    """List the contents of a directory.
 
     Cheap, and it stops you guessing filenames. Call this before read_file
-    whenever you are not certain a path exists.
+    whenever you are not certain a path exists. Works on the workspace, the
+    Desktop, Documents and Downloads.
 
     Args:
-        path: Directory relative to the workspace folder. Defaults to the root.
+        path: Directory to list, e.g. "Desktop" or "." for the workspace.
         pattern: Glob filter such as *.py or notes*.
     """
     target = _resolve(path)
@@ -184,7 +291,7 @@ def search_files(query: str, path: str = ".", max_results: int = 25) -> dict:
 
     Args:
         query: The text to look for.
-        path: Directory to search under, relative to the workspace.
+        path: Directory to search under, e.g. "." or "Desktop".
         max_results: Stop after this many matching lines.
     """
     if not query.strip():

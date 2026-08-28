@@ -315,7 +315,62 @@ class Session:
         self.hud.note("goodbye")
 
 
+def preflight() -> None:
+    """Refuse to start half-working.
+
+    Running `python run.py` with the system interpreter instead of the venv is
+    the easy mistake, and the failure it produces is actively misleading: the
+    HUD silently degrades to plain text, hotkeys never bind, and the agent
+    reports "required python packages are missing" as though that were a fact
+    about the world rather than a fact about which python you launched. Better
+    to say so once, here, in a sentence you can act on.
+    """
+    required = {
+        "rich": "the HUD",
+        "httpx": "web search and page fetching",
+        "bs4": "reading web pages",
+        "pynput": "push-to-talk hotkeys",
+        "psutil": "system stats",
+        "mss": "screen capture",
+        "pygetwindow": "window control",
+    }
+    missing = []
+    for module, purpose in required.items():
+        try:
+            __import__(module)
+        except ImportError:
+            missing.append(f"{module} ({purpose})")
+
+    if not missing:
+        return
+
+    root = Path(__file__).resolve().parent
+    venv_python = root / ".venv" / "Scripts" / "python.exe"
+    in_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+
+    print("=" * 70)
+    print(f"  {len(missing)} required package(s) are missing:\n")
+    for item in missing:
+        print(f"    - {item}")
+
+    if venv_python.exists() and not in_venv:
+        print(
+            "\n  You are running the system Python, not this project's venv.\n"
+            f"  Interpreter in use: {sys.executable}\n\n"
+            "  Start it with the venv interpreter instead:\n\n"
+            f"      {venv_python} run.py\n\n"
+            "  Or activate the venv first:\n\n"
+            "      .\\.venv\\Scripts\\Activate.ps1\n"
+            "      python run.py"
+        )
+    else:
+        print("\n  Install them with:\n\n      pip install -r requirements.txt")
+    print("=" * 70)
+    sys.exit(1)
+
+
 def main() -> int:
+    preflight()
     parser = argparse.ArgumentParser(description="JARVIS")
     parser.add_argument(
         "--text-only", action="store_true", help="no microphone or speaker"

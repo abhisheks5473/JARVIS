@@ -29,6 +29,79 @@ VOICE_DIR = DATA_DIR / "voice"
 for _p in (WORKSPACE, DATA_DIR, LOG_DIR, TRASH_DIR, VOICE_DIR):
     _p.mkdir(parents=True, exist_ok=True)
 
+# Folders the file tools may touch besides the workspace.
+#
+# A single workspace folder is the safe default, but it makes "put a file on
+# my desktop" impossible, which is most of what a desktop assistant gets asked
+# to do. These are the ordinary document folders -- never system directories,
+# and never the whole drive.
+#
+# Set JARVIS_EXTRA_ROOTS to a semicolon-separated list to change them, or to
+# an empty string to lock everything back down to the workspace alone.
+_DEFAULT_EXTRA_ROOTS = "Desktop;Documents;Downloads"
+_HOME = Path.home()
+
+
+def _resolve_root(name: str) -> Path | None:
+    """Find a user folder, following OneDrive folder redirection.
+
+    On most Windows machines with OneDrive enabled, Desktop and Documents do
+    not live under the home directory at all -- they are redirected into
+    %OneDrive%. Checking only ~/Desktop silently yields nothing, and the
+    assistant then insists it cannot reach your desktop while looking at a
+    path that does exist.
+    """
+    explicit = Path(name).expanduser()
+    if explicit.is_absolute():
+        try:
+            return explicit.resolve() if explicit.is_dir() else None
+        except OSError:
+            return None
+
+    onedrive = os.getenv("OneDrive") or os.getenv("OneDriveConsumer") or ""
+    candidates = [
+        _HOME / name,
+        *( [Path(onedrive) / name] if onedrive else [] ),
+        _HOME / "OneDrive" / name,
+    ]
+    for candidate in candidates:
+        try:
+            if candidate.is_dir():
+                return candidate.resolve()
+        except OSError:
+            continue
+    return None
+
+
+EXTRA_ROOTS: list[Path] = [
+    p
+    for p in (
+        _resolve_root(name.strip())
+        for name in os.getenv("JARVIS_EXTRA_ROOTS", _DEFAULT_EXTRA_ROOTS).split(";")
+        if name.strip()
+    )
+    if p is not None
+]
+
+ALLOWED_ROOTS: list[Path] = [WORKSPACE, *EXTRA_ROOTS]
+
+# Files that stay unreadable no matter which root they sit under. Widening the
+# roots to include Desktop would otherwise expose this project's own .env
+# whenever JARVIS is checked out onto the Desktop -- which is exactly where it
+# is. Matched on the filename, case-insensitively.
+SENSITIVE_FILE_PATTERNS = [
+    ".env", ".env.*", "*.pem", "*.key", "*.pfx", "*.p12",
+    "id_rsa*", "id_ed25519*", "id_ecdsa*", "*.ppk",
+    "credentials.json", "client_secret*.json", "*token*.json",
+    ".netrc", ".npmrc", ".pgpass", "*.kdbx", "wallet.dat",
+]
+
+# Directory names that stay off-limits wherever they appear in a path.
+SENSITIVE_DIR_NAMES = {
+    ".ssh", ".aws", ".gnupg", ".git", ".venv",
+    "node_modules", "AppData", "__pycache__",
+}
+
 
 # ---------------------------------------------------------------- models
 @dataclass(frozen=True)

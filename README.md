@@ -122,7 +122,7 @@ the built-in back on once you have billing; the doctor probes for it.
 
 **10. An eval suite from day one.**
 
-58 offline cases covering safety and routing — hard-deny, injection detection,
+71 offline cases covering safety and routing — hard-deny, injection detection,
 false-positive resistance, taint escalation, sandbox escapes, SSRF, secret
 redaction, model routing. They are deterministic, so they cost nothing and run
 on every change.
@@ -241,7 +241,7 @@ jarvis/
 ├── voice/             faster-whisper in, Piper out, push-to-talk
 ├── triggers/          scheduled and event-driven autonomy
 └── hud/               the display
-evals/                 58 offline cases + a live replay harness
+evals/                 71 offline cases + a live replay harness
 ```
 
 Every model ID lives in `config.py`. When Google deprecates one — and they
@@ -262,8 +262,12 @@ Decided once, in advance, rather than in the moment:
   Anything resembling a secret is redacted before it reaches the model or the
   logs, and the API key is stripped from every subprocess environment.
 - **No real deletes.** Trash, then a dated purge.
-- **Files are sandboxed** to `workspace/`, checked on the resolved path so
-  traversal and symlinks fail the same way.
+- **Files are confined** to the workspace plus Desktop, Documents and
+  Downloads, checked on the resolved path so traversal and symlinks fail the
+  same way. Credential files — `.env`, SSH keys, `*.pem`, token JSON — and
+  protected directories are refused inside those folders too, which matters
+  because this project lives on the Desktop and its own `.env` is therefore
+  in range. That denylist cannot be switched off.
 - **No local network fetches.** `fetch_url` refuses localhost, private ranges
   and cloud metadata endpoints — the standard SSRF exfiltration paths.
 

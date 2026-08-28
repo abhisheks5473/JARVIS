@@ -37,6 +37,15 @@ def check_paths() -> bool:
         else:
             _line(FAIL, label, f"missing: {path}")
             return False
+
+    # Worth printing explicitly: OneDrive folder redirection means Desktop is
+    # often not under the home directory, and a silently-missing root turns
+    # into "I cannot reach your desktop" at the worst moment.
+    extra = ", ".join(str(r) for r in config.EXTRA_ROOTS) or "(none)"
+    _line(OK, "file roots", f"workspace + {extra}")
+    for name in ("Desktop", "Documents", "Downloads"):
+        if not any(r.name == name for r in config.EXTRA_ROOTS):
+            _line(WARN, f"root {name}", "not found; file tools cannot reach it")
     return True
 
 
