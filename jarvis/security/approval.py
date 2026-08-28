@@ -290,7 +290,23 @@ class ApprovalGate:
                 reason=f"{reason} (no approval channel available)",
                 escalated_by_taint=escalated,
             )
-        approved = self.prompter(tool, arguments, reason)
+        # A prompter is UI, and UI breaks: closed stdin, a terminal in a
+        # strange state, a HUD bug. An audit found an exception here escaping
+        # all the way out and killing the turn. Fail closed instead -- a
+        # crashed prompt is not consent.
+        try:
+            approved = bool(self.prompter(tool, arguments, reason))
+        except Exception as exc:  # noqa: BLE001
+            return Judgement(
+                Outcome.DENIED,
+                risk,
+                reason=(
+                    f"could not ask for approval ({type(exc).__name__}); "
+                    "refusing rather than assuming consent"
+                ),
+                escalated_by_taint=escalated,
+            )
+
         return Judgement(
             Outcome.ALLOW if approved else Outcome.DENIED,
             risk,

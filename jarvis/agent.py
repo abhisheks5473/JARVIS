@@ -37,7 +37,7 @@ from .quota import Mode, governor
 from .router import choose_profile, choose_tier, fast_path, required_tools
 from .security.approval import ApprovalGate, Outcome, redact
 from .security.taint import Level, TaintLedger, wrap_untrusted
-from .tools import BUILTIN_TOOLS, registry, use_profile
+from .tools import BUILTIN_TOOLS, profile_tools, registry
 
 
 @dataclass
@@ -75,6 +75,9 @@ class Agent:
         self.started_at = time.time()
         self.turns = 0
         self._summary: str = ""
+        # A scheduled job knows which toolset it needs; setting it here keeps
+        # that choice local to the agent instead of mutating the registry.
+        self.forced_profile: str | None = None
 
     # ------------------------------------------------------------ events
     def _emit(self, kind: str, **data: Any) -> None:
@@ -203,7 +206,38 @@ class Agent:
     # ------------------------------------------------------------ tools
     def _execute(self, call: Any, report: TurnReport) -> dict:
         name = getattr(call, "name", "")
-        arguments = dict(getattr(call, "arguments", {}) or {})
+
+        # The model does not always send what the schema promised. An audit
+        # found a bare string in `arguments` raising ValueError out of dict()
+        # and taking the whole turn with it. Coerce, and report the mismatch
+        # back as data so the model can retry properly.
+        raw_arguments = getattr(call, "arguments", None) or {}
+        if isinstance(raw_arguments, dict):
+            arguments = dict(raw_arguments)
+        else:
+            arguments = {}
+            if isinstance(raw_arguments, str):
+                try:
+                    parsed = json.loads(raw_arguments)
+                    if isinstance(parsed, dict):
+                        arguments = parsed
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            if not arguments:
+                report.denied.append(name or "unknown")
+                return {
+                    "error": (
+                        f"arguments for {name or 'that tool'} were not a JSON "
+                        f"object (got {type(raw_arguments).__name__})"
+                    ),
+                    "hint": "resend the call with arguments as a JSON object",
+                }
+
+        if not name:
+            return {
+                "error": "the tool call arrived with no tool name",
+                "hint": "resend the call naming a tool from the list",
+            }
 
         judgement = self.gate.evaluate(
             name, arguments, ledger=self.ledger, interactive=self.interactive
@@ -302,8 +336,10 @@ class Agent:
         self.compact_history()
         self._append_user(user_text)
 
-        profile = choose_profile(user_text)
-        offered = use_profile(profile, extra=required_tools(user_text))
+        profile = self.forced_profile or choose_profile(user_text)
+        # Resolved by name, never by mutating the registry: a scheduled job on
+        # another thread must not be able to change this turn's toolset.
+        offered = profile_tools(profile, extra=required_tools(user_text))
         chosen_tier = tier or choose_tier(user_text, self.turns)
         self._emit(
             "turn_start",
@@ -314,7 +350,7 @@ class Agent:
         )
 
         system_instruction = self._system_instruction()
-        declarations = registry.declarations(extra=BUILTIN_TOOLS)
+        declarations = registry.declarations(extra=BUILTIN_TOOLS, names=offered)
         tool_budget = config.MAX_TOOL_CALLS_PER_TURN
         hit_limit = True
 

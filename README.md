@@ -117,12 +117,16 @@ bisection: the identical request succeeds without it, immediately before and
 after. Left enabled, it makes every agent turn fail.
 
 So it is off by default behind `JARVIS_GOOGLE_SEARCH`, and `web_search` runs
-through DuckDuckGo's HTML endpoint instead: no key, no quota, no billing. Turn
-the built-in back on once you have billing; the doctor probes for it.
+on scraped backends instead: no key, no quota, no billing. Search engines
+rate-limit scrapers, so there are four in a chain — DuckDuckGo HTML, DuckDuckGo
+Lite, Mojeek, then the Wikipedia API, which is a real API and never blocks.
+Anti-bot challenge pages are detected explicitly, because reporting one as "no
+results" would have the agent claim it found nothing when it was turned away at
+the door.
 
 **10. An eval suite from day one.**
 
-71 offline cases covering safety and routing — hard-deny, injection detection,
+102 offline cases covering safety and routing — hard-deny, injection detection,
 false-positive resistance, taint escalation, sandbox escapes, SSRF, secret
 redaction, model routing. They are deterministic, so they cost nothing and run
 on every change.
@@ -241,7 +245,7 @@ jarvis/
 ├── voice/             faster-whisper in, Piper out, push-to-talk
 ├── triggers/          scheduled and event-driven autonomy
 └── hud/               the display
-evals/                 71 offline cases + a live replay harness
+evals/                 102 offline cases + a live replay harness
 ```
 
 Every model ID lives in `config.py`. When Google deprecates one — and they

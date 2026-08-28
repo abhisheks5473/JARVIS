@@ -25,14 +25,41 @@ from pathlib import Path
 
 from .. import config
 from ..security import trash
+from ..security.approval import redact
 from .base import ToolError, tool
 
 # Reading a 400MB log into a prompt is a quota accident, not a feature.
 MAX_READ_BYTES = 100_000
+
+# Desktop can contain an entire node_modules or site-packages tree. Walking it
+# unbounded made search_files take minutes and read third-party source.
+MAX_FILES_SCANNED = 4000
+PRUNED_DIRS = {
+    ".git", ".venv", "venv", "node_modules", "__pycache__", ".mypy_cache",
+    ".pytest_cache", ".tox", "site-packages", "dist-info", ".idea", ".vscode",
+    "AppData", "$RECYCLE.BIN", "System Volume Information",
+}
+
+
+def _walk(root: Path):
+    """Yield files under `root`, skipping trees nobody means to search."""
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        try:
+            for child in current.iterdir():
+                if child.is_dir():
+                    if child.name in PRUNED_DIRS or child.name.startswith("."):
+                        continue
+                    stack.append(child)
+                else:
+                    yield child
+        except (OSError, PermissionError):
+            continue
 TEXT_SUFFIXES = {
     ".txt", ".md", ".py", ".js", ".ts", ".tsx", ".jsx", ".json", ".yaml", ".yml",
     ".toml", ".ini", ".cfg", ".csv", ".log", ".html", ".css", ".xml", ".sql",
-    ".sh", ".ps1", ".bat", ".env", ".gitignore", ".rst", ".java", ".c", ".h",
+    ".sh", ".ps1", ".bat", ".gitignore", ".rst", ".java", ".c", ".h",
     ".cpp", ".go", ".rs", ".rb", ".php", ".swift", ".kt", ".r", ".jsonl",
 }
 
@@ -54,9 +81,12 @@ def _is_sensitive(candidate: Path) -> str | None:
         if blocked.lower() in parts:
             return f"{blocked} is a protected directory"
 
-    # The agent's own state is not the agent's business.
+    # The agent's own state is not the agent's business. Note the equality
+    # check: a directory is not in its own `parents`, so an earlier version
+    # blocked data/memory.db but happily listed data/ itself.
     try:
-        if config.DATA_DIR.resolve() in candidate.parents:
+        data = config.DATA_DIR.resolve()
+        if candidate == data or data in candidate.parents:
             return "that is the private data directory"
     except OSError:
         pass
@@ -263,6 +293,10 @@ def list_directory(path: str = ".", pattern: str = "*") -> dict:
     for child in sorted(
         target.glob(pattern), key=lambda p: (p.is_file(), p.name.lower())
     ):
+        # Do not advertise what cannot be opened. Listing .env by name is a
+        # smaller problem than reading it, but it is still a signpost.
+        if _is_sensitive(child):
+            continue
         try:
             entries.append(
                 {
@@ -300,12 +334,19 @@ def search_files(query: str, path: str = ".", max_results: int = 25) -> dict:
     root = _resolve(path)
     needle = query.lower()
     hits: list[dict] = []
+    scanned = 0
 
-    for candidate in root.rglob("*"):
-        if len(hits) >= max_results:
+    # _resolve validates the root. It says nothing about the thousands of
+    # files underneath it, and an audit found this walking straight into
+    # client_secret.json and prod.env. Every file is checked individually.
+    for candidate in _walk(root):
+        if len(hits) >= max_results or scanned > MAX_FILES_SCANNED:
             break
         if not candidate.is_file() or candidate.suffix.lower() not in TEXT_SUFFIXES:
             continue
+        if _is_sensitive(candidate):
+            continue
+        scanned += 1
         try:
             if candidate.stat().st_size > MAX_READ_BYTES * 5:
                 continue
@@ -316,7 +357,7 @@ def search_files(query: str, path: str = ".", max_results: int = 25) -> dict:
                         {
                             "file": _relative(candidate),
                             "line": number,
-                            "text": line.strip()[:200],
+                            "text": redact(line.strip()[:200]),
                         }
                     )
                     if len(hits) >= max_results:
@@ -324,7 +365,13 @@ def search_files(query: str, path: str = ".", max_results: int = 25) -> dict:
         except OSError:
             continue
 
-    return {"query": query, "matches": hits, "count": len(hits)}
+    return {
+        "query": query,
+        "matches": hits,
+        "count": len(hits),
+        "files_scanned": scanned,
+        "truncated": scanned > MAX_FILES_SCANNED,
+    }
 
 
 @tool(group="files")

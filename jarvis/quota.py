@@ -212,6 +212,21 @@ class QuotaGovernor:
                     mode=mode,
                 )
 
+            # A request larger than the entire per-minute allowance can never
+            # fit, however long we wait. Returning WAIT there makes the caller
+            # spin through every retry and fail anyway, which presents as a
+            # hang. Say plainly that the limit is misconfigured instead.
+            if self._limits.tpm and est_tokens >= self._limits.tpm:
+                return Verdict(
+                    Decision.DENY,
+                    reason=(
+                        f"a single request needs about {est_tokens} tokens but "
+                        f"JARVIS_TPM is {self._limits.tpm}; waiting cannot help. "
+                        "Set it to your project's real figure from AI Studio."
+                    ),
+                    mode=mode,
+                )
+
             if tpm + est_tokens > self._limits.tpm:
                 return Verdict(
                     Decision.WAIT,

@@ -153,7 +153,26 @@ def read_log_tail(path: str, lines: int = 40) -> dict:
         path: Full path to the log file.
         lines: How many trailing lines to return. Maximum 200.
     """
+    from ..security.approval import redact
+    from .files import _is_sensitive
+
     target = Path(path).expanduser()
+    try:
+        target = target.resolve()
+    except OSError:
+        raise ToolError(f"unusable path: {path}", hint="give a full path") from None
+
+    # This tool deliberately reads outside the workspace roots, which is the
+    # point of it -- logs live in odd places. That made it the one file tool
+    # with no boundary at all, and an audit found it happily returning the
+    # contents of .env. The credential denylist applies here too.
+    reason = _is_sensitive(target)
+    if reason:
+        raise ToolError(
+            f"refusing to read that file -- {reason}",
+            hint="credential files are off-limits; tell the user rather than retrying",
+        )
+
     if not target.is_file():
         raise ToolError(f"no such file: {target}", hint="check the full path")
 
@@ -163,7 +182,8 @@ def read_log_tail(path: str, lines: int = 40) -> dict:
     except OSError as exc:
         raise ToolError(f"could not read {target}: {exc}", hint="") from None
 
-    tail = content[-count:]
+    # Logs are a classic place for a token to end up in plain text.
+    tail = [redact(line) for line in content[-count:]]
     return {
         "path": str(target),
         "lines": tail,

@@ -94,6 +94,18 @@ PROFILES: dict[str, set[str]] = {
 }
 
 
+def profile_tools(name: str = "default", extra: set[str] | None = None) -> set[str]:
+    """The tool names for a profile, WITHOUT mutating the registry.
+
+    Use this on any request path. `use_profile` mutates process-wide state and
+    is only safe for the single-threaded REPL, because a background job on the
+    scheduler thread would otherwise redefine the toolset mid-turn.
+    """
+    if name == "everything":
+        return set(registry.names())
+    return set(PROFILES.get(name, PROFILES["default"])) | (extra or set())
+
+
 def use_profile(name: str = "default", extra: set[str] | None = None) -> list[str]:
     """Activate a named tool set and return the names now offered.
 
@@ -126,6 +138,7 @@ __all__ = [
     "ToolError",
     "ToolSpec",
     "catalogue",
+    "profile_tools",
     "registry",
     "tool",
     "use_profile",

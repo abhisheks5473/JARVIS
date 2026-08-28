@@ -1,9 +1,14 @@
 """The web.
 
-Search itself is Gemini's own built-in `{"type": "google_search"}` tool, which
-the agent passes alongside these functions -- there is no separate search API
-to wire up and no key to manage. What that does not give you is the ability to
-read one specific page in full, which is what `fetch_url` is for.
+Gemini's built-in `{"type": "google_search"}` grounding tool is documented as
+free and built in. It is not, on a free-tier key: it returns 429 on every
+call, verified by bisection. So search here is scraped, and because search
+engines rate-limit scrapers, it is scraped from four places in a chain --
+DuckDuckGo HTML, DuckDuckGo Lite, Mojeek, then the Wikipedia API, which is a
+real API and never blocks. Anti-bot challenge pages are detected explicitly:
+being turned away is not the same fact as finding nothing.
+
+`fetch_url` covers the other half, reading one specific page in full.
 
 Everything returned here is untrusted by definition. This is the exact surface
 prompt injection targets: an attacker controls the page, the page enters the
@@ -97,6 +102,10 @@ def web_search(query: str, max_results: int = 6) -> dict:
     The snippets are often enough to answer with. Only call fetch_url
     afterwards if you genuinely need the full page.
 
+    Search engines sometimes rate-limit automated queries. If this returns an
+    error saying every backend declined, say so plainly and answer from what
+    you know or ask for a URL -- never invent results.
+
     Args:
         query: What to search for. Plain keywords work better than a question.
         max_results: How many results to return. Six is usually plenty.
@@ -118,60 +127,179 @@ def web_search(query: str, max_results: int = 6) -> dict:
             hint="run: pip install httpx beautifulsoup4",
         ) from None
 
-    # DuckDuckGo's HTML endpoint: no API key, no quota, no billing. Gemini's
-    # own google_search grounding tool returns 429 on the free tier, so this
-    # is what actually gives the agent working search here.
-    try:
-        response = httpx.post(
-            "https://html.duckduckgo.com/html/",
-            data={"q": query},
-            timeout=TIMEOUT_S,
-            follow_redirects=True,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
-                )
-            },
-        )
-        response.raise_for_status()
-    except httpx.HTTPError as exc:
-        raise ToolError(
-            f"search failed: {type(exc).__name__}",
-            hint="tell the user search is unreachable; do not invent results",
-        ) from None
-
-    soup = BeautifulSoup(response.text, "html.parser")
-    results: list[dict] = []
+    # No API key, no quota, no billing -- Gemini's own google_search grounding
+    # returns 429 on the free tier, so this is what actually gives the agent
+    # working search.
+    #
+    # One endpoint is not enough. An audit caught DuckDuckGo serving an
+    # anti-bot challenge (HTTP 202, CAPTCHA page) after a burst of queries,
+    # which the old code reported as "no results found" -- a blocked search
+    # and an empty search are very different facts. Backends are tried in
+    # order, challenge pages are detected explicitly, and if they all decline
+    # that is reported honestly rather than as an empty result.
     limit = max(1, min(int(max_results), 10))
+    attempted: list[str] = []
 
-    for block in soup.select(".result")[: limit * 2]:
-        anchor = block.select_one(".result__a")
-        if anchor is None:
+    for name, fetch in (
+        ("duckduckgo-html", _ddg_html),
+        ("duckduckgo-lite", _ddg_lite),
+        ("mojeek", _mojeek),
+        ("wikipedia", _wikipedia),
+    ):
+        attempted.append(name)
+        try:
+            results = fetch(httpx, BeautifulSoup, query, limit)
+        except Exception:  # noqa: BLE001 - a dead backend must not end the search
             continue
-        snippet_el = block.select_one(".result__snippet")
-        results.append(
+        if results:
+            payload = {
+                "query": query,
+                "results": results[:limit],
+                "count": len(results[:limit]),
+                "source": name,
+                "cached": False,
+            }
+            _CACHE[cache_key] = (time.time(), payload)
+            return payload
+
+    raise ToolError(
+        f"every search backend declined the request (tried {', '.join(attempted)})",
+        hint=(
+            "search engines rate-limit automated queries; tell the user search "
+            "is temporarily blocked and answer from what you already know, or "
+            "ask them for a specific URL to fetch. Do not invent results."
+        ),
+    )
+
+
+# Anti-bot interstitials return a normal status with a page full of apology.
+# Treating one as an empty result set is how an agent ends up saying "I found
+# nothing" when it was actually turned away at the door.
+_CHALLENGE = re.compile(
+    r"(bots use|complete the following challenge|are you a robot|"
+    r"unusual traffic|verify you are human|captcha|cf-browser-verification)",
+    re.I,
+)
+
+_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
+
+def _blocked(text: str) -> bool:
+    return bool(_CHALLENGE.search(text[:4000]))
+
+
+def _ddg_html(httpx, BeautifulSoup, query: str, limit: int) -> list[dict]:
+    r = httpx.post(
+        "https://html.duckduckgo.com/html/",
+        data={"q": query},
+        timeout=TIMEOUT_S,
+        follow_redirects=True,
+        headers={"User-Agent": _UA},
+    )
+    if _blocked(r.text):
+        return []
+    soup = BeautifulSoup(r.text, "html.parser")
+    out = []
+    for block in soup.select(".result")[: limit * 3]:
+        a = block.select_one(".result__a")
+        if a is None:
+            continue
+        snip = block.select_one(".result__snippet")
+        out.append(
             {
-                "title": anchor.get_text(" ", strip=True)[:160],
-                "url": _clean_ddg_link(anchor.get("href", "")),
-                "snippet": (
-                    snippet_el.get_text(" ", strip=True)[:320] if snippet_el else ""
-                ),
+                "title": a.get_text(" ", strip=True)[:160],
+                "url": _clean_ddg_link(a.get("href", "")),
+                "snippet": snip.get_text(" ", strip=True)[:320] if snip else "",
             }
         )
-        if len(results) >= limit:
-            break
+    return out
 
-    if not results:
-        return {
-            "query": query,
-            "results": [],
-            "note": "no results found; say so rather than guessing",
-        }
 
-    payload = {"query": query, "results": results, "count": len(results), "cached": False}
-    _CACHE[cache_key] = (time.time(), payload)
-    return payload
+def _ddg_lite(httpx, BeautifulSoup, query: str, limit: int) -> list[dict]:
+    r = httpx.post(
+        "https://lite.duckduckgo.com/lite/",
+        data={"q": query},
+        timeout=TIMEOUT_S,
+        follow_redirects=True,
+        headers={"User-Agent": _UA},
+    )
+    if _blocked(r.text):
+        return []
+    soup = BeautifulSoup(r.text, "html.parser")
+    out = []
+    for a in soup.select("a.result-link")[: limit * 3]:
+        out.append(
+            {
+                "title": a.get_text(" ", strip=True)[:160],
+                "url": _clean_ddg_link(a.get("href", "")),
+                "snippet": "",
+            }
+        )
+    return out
+
+
+def _mojeek(httpx, BeautifulSoup, query: str, limit: int) -> list[dict]:
+    """An independent index that does not mind being read by a script."""
+    r = httpx.get(
+        "https://www.mojeek.com/search",
+        params={"q": query},
+        timeout=TIMEOUT_S,
+        follow_redirects=True,
+        headers={"User-Agent": _UA},
+    )
+    if _blocked(r.text):
+        return []
+    soup = BeautifulSoup(r.text, "html.parser")
+    out = []
+    for li in soup.select("ul.results-standard li, .results li")[: limit * 3]:
+        a = li.select_one("a.title") or li.select_one("h2 a") or li.select_one("a")
+        if a is None or not str(a.get("href", "")).startswith("http"):
+            continue
+        p = li.select_one("p.s") or li.select_one("p")
+        out.append(
+            {
+                "title": a.get_text(" ", strip=True)[:160],
+                "url": a.get("href", ""),
+                "snippet": p.get_text(" ", strip=True)[:320] if p else "",
+            }
+        )
+    return out
+
+
+def _wikipedia(httpx, BeautifulSoup, query: str, limit: int) -> list[dict]:
+    """Last resort, and a genuinely good one for factual questions.
+
+    A real API rather than a scrape, so it neither rate-limits nor challenges.
+    It will not answer "news today", but it reliably answers "who is", "what
+    is" and "when was", which is a large share of what gets asked.
+    """
+    r = httpx.get(
+        "https://en.wikipedia.org/w/api.php",
+        params={
+            "action": "query",
+            "list": "search",
+            "srsearch": query,
+            "srlimit": limit,
+            "format": "json",
+        },
+        timeout=TIMEOUT_S,
+        headers={"User-Agent": "JARVIS/1.0 (personal assistant)"},
+    )
+    out = []
+    for hit in r.json().get("query", {}).get("search", []):
+        title = hit.get("title", "")
+        snippet = re.sub(r"<[^>]+>", "", hit.get("snippet", ""))
+        out.append(
+            {
+                "title": title[:160],
+                "url": "https://en.wikipedia.org/wiki/" + title.replace(" ", "_"),
+                "snippet": snippet[:320],
+            }
+        )
+    return out
 
 
 def _clean_ddg_link(href: str) -> str:

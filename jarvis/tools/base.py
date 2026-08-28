@@ -225,13 +225,32 @@ class Registry:
             s for s in specs if s.group in self._active_groups or s.always_available
         ]
 
-    def declarations(self, extra: list[dict] | None = None) -> list[dict]:
+    def select(self, names: set[str]) -> list[ToolSpec]:
+        """Resolve a tool set *without touching shared state*.
+
+        `activate`/`active` mutate the registry, which is fine for a REPL
+        command but not for a turn: APScheduler runs background jobs on their
+        own thread, and an audit found a job firing mid-conversation rewrote
+        the active set out from under the user's turn -- 150 of 150 turns were
+        sent the wrong toolset. Anything on a request path uses this instead.
+        """
+        return [
+            s for s in self._tools.values() if s.name in names or s.always_available
+        ]
+
+    def declarations(
+        self, extra: list[dict] | None = None, names: set[str] | None = None
+    ) -> list[dict]:
         """Tool declarations for the API call.
+
+        `names` selects explicitly and is thread-safe; omitting it falls back
+        to the mutable active set, which only the REPL should rely on.
 
         `extra` carries Gemini's own built-ins, e.g. {"type": "google_search"},
         which are passed alongside your functions rather than implemented.
         """
-        decls = [s.declaration() for s in self.active()]
+        specs = self.select(names) if names is not None else self.active()
+        decls = [s.declaration() for s in specs]
         if extra:
             decls.extend(extra)
         return decls

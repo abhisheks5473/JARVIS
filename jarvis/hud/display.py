@@ -21,6 +21,7 @@ from ..security.taint import Level
 
 try:
     from rich.console import Console, Group
+    from rich.markup import escape
     from rich.panel import Panel
     from rich.table import Table
     from rich.text import Text
@@ -28,6 +29,21 @@ try:
     RICH = True
 except ImportError:  # pragma: no cover - exercised only on a broken install
     RICH = False
+
+    def escape(text: str) -> str:  # type: ignore[misc]
+        return text
+
+
+def _safe(value: object) -> str:
+    """Escape anything the model or a web page controls.
+
+    Tool names, tool output and replies all originate outside this process.
+    An audit found "[/bold]" in a tool name raising MarkupError and killing
+    the REPL, and "[link=file:///c:/]click[/link]" being *rendered* -- a
+    hostile page could put a clickable link in your terminal. Everything
+    interpolated into a markup string goes through here.
+    """
+    return escape(str(value))
 
 
 _MODE_STYLE = {
@@ -125,35 +141,36 @@ class HUD(PlainHUD):
         )
 
     def note(self, text: str) -> None:
-        self.console.print(f"  [dim]{text}[/dim]")
+        self.console.print(f"  [dim]{_safe(text)}[/dim]")
 
     def user_echo(self, text: str) -> None:
-        self.console.print(f"[bold white]you[/bold white] [dim]>[/dim] {text}")
+        self.console.print(f"[bold white]you[/bold white] [dim]>[/dim] {_safe(text)}")
 
     # ------------------------------------------------------------ events
     def event(self, kind: str, data: dict) -> None:
         if kind == "turn_start":
             self.console.print(
-                f"  [dim]{data.get('model')} · thinking {data.get('thinking')} · "
-                f"{data.get('tools')} tools ({data.get('profile')})[/dim]"
+                f"  [dim]{_safe(data.get('model'))} · thinking "
+                f"{_safe(data.get('thinking'))} · {_safe(data.get('tools'))} tools "
+                f"({_safe(data.get('profile'))})[/dim]"
             )
         elif kind == "tool_judged":
             outcome = data.get("outcome")
             if outcome == "denied":
-                self.console.print(f"  [red]denied[/red] {data.get('tool')}")
+                self.console.print(f"  [red]denied[/red] {_safe(data.get('tool'))}")
             elif outcome == "queued":
-                self.console.print(f"  [yellow]queued[/yellow] {data.get('tool')}")
+                self.console.print(f"  [yellow]queued[/yellow] {_safe(data.get('tool'))}")
             elif data.get("escalated"):
                 self.console.print(
-                    f"  [yellow]escalated[/yellow] {data.get('tool')} "
+                    f"  [yellow]escalated[/yellow] {_safe(data.get('tool'))} "
                     "[dim](conversation is tainted)[/dim]"
                 )
         elif kind == "tool_done":
             style = "green" if data.get("ok") else "red"
             mark = "OK" if data.get("ok") else "XX"
             self.console.print(
-                f"  [{style}]{mark}[/{style}] [cyan]{data.get('tool')}[/cyan] "
-                f"[dim]{data.get('ms')}ms[/dim]"
+                f"  [{style}]{mark}[/{style}] [cyan]{_safe(data.get('tool'))}[/cyan] "
+                f"[dim]{_safe(data.get('ms'))}ms[/dim]"
             )
         elif kind == "injection_detected":
             self.console.print(
@@ -172,12 +189,12 @@ class HUD(PlainHUD):
             )
         elif kind == "compacted":
             self.console.print(
-                f"  [dim]history compacted, {data.get('kept')} entries kept[/dim]"
+                f"  [dim]history compacted, {_safe(data.get('kept'))} entries kept[/dim]"
             )
         elif kind == "quota_exhausted":
-            self.console.print(f"  [bold red]quota:[/bold red] {data.get('reason')}")
+            self.console.print(f"  [bold red]quota:[/bold red] {_safe(data.get('reason'))}")
         elif kind == "error":
-            self.console.print(f"  [red]error:[/red] {data.get('message')}")
+            self.console.print(f"  [red]error:[/red] {_safe(data.get('message'))}")
 
     def reply(self, text: str) -> None:
         self.console.print(
@@ -195,13 +212,13 @@ class HUD(PlainHUD):
         table.add_column(style="dim", justify="right")
         table.add_column(style="bold white")
         for key, value in arguments.items():
-            table.add_row(key, str(value)[:400])
+            table.add_row(_safe(key), _safe(value)[:400])
 
         hostile = "INJECTION RISK" in reason
         self.console.print(
             Panel(
                 Group(Text(reason, style="bold red" if hostile else "yellow"), table),
-                title=f"[bold yellow]approve {tool}?[/bold yellow]",
+                title=f"[bold yellow]approve {_safe(tool)}?[/bold yellow]",
                 border_style="red" if hostile else "yellow",
             )
         )
@@ -236,7 +253,7 @@ class HUD(PlainHUD):
         table.add_row("mode", f"[{style}]{snapshot.mode.value}[/{style}]")
         table.add_row("security", f"[{taint_style}]{taint_label}[/{taint_style}]")
         if extra:
-            table.add_row("", f"[dim]{extra}[/dim]")
+            table.add_row("", f"[dim]{_safe(extra)}[/dim]")
 
         self.console.print(
             Panel(table, title="[dim]status[/dim]", border_style="dim", padding=(0, 1))

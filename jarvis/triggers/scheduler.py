@@ -31,7 +31,6 @@ from ..prompts import BRIEFING_PROMPT
 from ..quota import governor
 from ..security.approval import ApprovalGate
 from ..security.trash import empty_expired
-from ..tools import use_profile
 
 
 @dataclass
@@ -62,8 +61,8 @@ def run_autonomous(name: str, prompt: str, profile: str = "default") -> JobResul
         log.info("skipping job %s: %s", name, verdict.reason)
         return JobResult(name, ran=False, skipped_reason=verdict.reason)
 
-    use_profile(profile)
     agent = _unattended_agent()
+    agent.forced_profile = profile
 
     started = time.time()
     report = agent.run(prompt)

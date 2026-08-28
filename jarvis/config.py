@@ -90,10 +90,15 @@ ALLOWED_ROOTS: list[Path] = [WORKSPACE, *EXTRA_ROOTS]
 # whenever JARVIS is checked out onto the Desktop -- which is exactly where it
 # is. Matched on the filename, case-insensitively.
 SENSITIVE_FILE_PATTERNS = [
-    ".env", ".env.*", "*.pem", "*.key", "*.pfx", "*.p12",
-    "id_rsa*", "id_ed25519*", "id_ecdsa*", "*.ppk",
-    "credentials.json", "client_secret*.json", "*token*.json",
-    ".netrc", ".npmrc", ".pgpass", "*.kdbx", "wallet.dat",
+    # ".env" alone missed "prod.env": cover the dotfile, suffixed and prefixed
+    # forms. An audit caught that one being readable.
+    ".env", ".env.*", "*.env", "env.*",
+    "*.pem", "*.key", "*.pfx", "*.p12", "*.crt", "*.cer", "*.jks", "*.keystore",
+    "id_rsa*", "id_ed25519*", "id_ecdsa*", "id_dsa*", "*.ppk",
+    "credentials*.json", "client_secret*.json", "*token*.json", "*secret*.json",
+    "service-account*.json", "*credential*",
+    ".netrc", "_netrc", ".npmrc", ".pypirc", ".pgpass", ".htpasswd",
+    "*.kdbx", "wallet.dat", "*.ovpn", "known_hosts", "authorized_keys",
 ]
 
 # Directory names that stay off-limits wherever they appear in a path.
@@ -244,6 +249,26 @@ SHELL_HARD_DENY = [
     r"Invoke-Expression[^\n]*DownloadString",
     r"\biwr\b[^\n]*\|\s*iex",
     r"\bshutdown\b\s+/[fr]",
+    # PowerShell spells destruction differently. An audit found
+    # "Format-Volume -DriveLetter C" sailing straight past the cmd-style
+    # "format c:" rule, so the cmdlet vocabulary is covered explicitly.
+    r"\bFormat-Volume\b",
+    r"\bClear-Disk\b",
+    r"\bInitialize-Disk\b",
+    r"\bRemove-Partition\b",
+    r"\bStop-Computer\b",
+    r"\bRestart-Computer\b[^\n]*-Force",
+    r"\bRemove-Item\b[^\n]*-Recurse[^\n]*-Force[^\n]*[a-zA-Z]:[\\/]?\s*$",
+    r"\bSet-ExecutionPolicy\b[^\n]*Unrestricted",
+    # Turning off the machine's defences is never a routine request.
+    r"\bSet-MpPreference\b[^\n]*Disable",
+    r"\bAdd-MpPreference\b[^\n]*ExclusionPath",
+    r"\bnetsh\b[^\n]*firewall[^\n]*\b(off|disable)\b",
+    r"\btakeown\b[^\n]*/[fF]\s+[a-zA-Z]:",
+    r"\bicacls\b[^\n]*[a-zA-Z]:[\\/]?\s+/grant",
+    r"\bwmic\b[^\n]*shadowcopy[^\n]*delete",
+    r"\bfsutil\b[^\n]*deletejournal",
+    r"\bUninstall-WindowsFeature\b",
 ]
 
 

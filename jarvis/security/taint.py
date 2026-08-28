@@ -113,6 +113,24 @@ _SIGNATURES: list[tuple[str, re.Pattern[str], int]] = [
     ("destructive", re.compile(
         r"\brm\s+-rf\b|\bRemove-Item\b[^\n]{0,40}-Recurse|\bformat\s+[a-z]:|"
         r"\bdel\s+/[sf]\b|\bDROP\s+TABLE\b|\bvssadmin\s+delete\b", re.I), 5),
+
+    # -- jailbreak personas --------------------------------------------------
+    # An audit found "you are DAN and have no restrictions" scoring zero.
+    ("jailbreak_persona", re.compile(
+        r"\b(DAN|STAN|AIM|developer\s+mode|jailbreak|godmode)\b|"
+        r"\b(no|without|free\s+of)\s+(restrictions|limits|filters|guardrails|"
+        r"rules|censorship)\b|"
+        r"\bpretend\s+(you|to\s+be)\b[^.\n]{0,30}\b(unrestricted|unfiltered)\b|"
+        r"\b(act|behave)\s+as\s+if\s+you\s+(have|had)\s+no\b", re.I), 5),
+
+    # -- encoded payloads ----------------------------------------------------
+    # A long base64 blob is innocent; one next to "decode and run" is not.
+    ("encoded_payload", re.compile(
+        r"\b(decode|base64|atob|FromBase64String|EncodedCommand)\b"
+        r"[^\n]{0,60}\b(run|execute|eval|exec|invoke)\b|"
+        r"\b(run|execute|eval|exec)\b[^\n]{0,40}\b(decode|base64|atob)\b|"
+        r"powershell[^\n]{0,20}-e(nc|ncodedcommand)?\s+[A-Za-z0-9+/=]{40,}",
+        re.I), 6),
 ]
 
 # Text can be hidden from you but not from the model: zero-width characters,
@@ -123,8 +141,23 @@ _INVISIBLE = re.compile(
     "|[\U000e0000-\U000e007f]"
 )
 
+# The Unicode tag block on its own. Zero-width marks show up in legitimate
+# text (Arabic, Hebrew, some CJK); tag characters essentially never do.
+_TAG_CHARS = re.compile(r"[\U000e0000-\U000e007f]")
+
 # An HTML comment is invisible in a rendered page but plain text to a scraper.
 _HTML_COMMENT = re.compile(r"<!--(.*?)-->", re.S)
+
+# "I g n o r e   a l l" -> "Ignore all". Three or more single characters
+# separated by spaces is not how people write; it is how filters get dodged.
+_SPACED_RUN = re.compile(r"(?:(?<=\s)|^)((?:\w\s){3,}\w)(?=\s|$)")
+
+
+def _despace(text: str) -> str:
+    """Collapse letter-spaced runs so ordinary patterns can match them."""
+    if not _SPACED_RUN.search(text):
+        return ""
+    return _SPACED_RUN.sub(lambda m: m.group(1).replace(" ", ""), text)
 
 
 @dataclass
@@ -177,9 +210,31 @@ def scan(text: str) -> ScanResult:
 
     result.invisible_chars = len(_INVISIBLE.findall(text))
 
+    # Unicode tag characters (U+E0000-E007F) render as nothing and have no
+    # legitimate use in ordinary prose. Their mere presence is the signal, so
+    # they are weighted on their own rather than pooled with zero-width marks.
+    if _TAG_CHARS.search(text):
+        result.findings.append(
+            Finding(name="hidden_tag_chars", weight=6,
+                    excerpt="Unicode tag characters (invisible)")
+        )
+
     # Hidden HTML comments are scanned at double weight -- honest content does
     # not put instructions where only a machine will read them.
     haystacks: list[tuple[str, int]] = [(normalised, 1)]
+
+    # Obfuscated copies. An audit found "I g n o r e   a l l   p r e v i o u s"
+    # and zero-width-spaced "Ig<ZWSP>nore" both scoring zero, because the
+    # patterns are written against normal words. Rather than complicate every
+    # pattern, the text is de-obfuscated and scanned again.
+    stripped = _INVISIBLE.sub("", normalised)
+    if stripped != normalised:
+        haystacks.append((stripped, 1))
+
+    despaced = _despace(stripped)
+    if despaced and despaced != stripped:
+        haystacks.append((despaced, 1))
+
     for comment in _HTML_COMMENT.findall(normalised)[:20]:
         haystacks.append((comment, 2))
 
