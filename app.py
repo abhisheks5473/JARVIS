@@ -54,6 +54,8 @@ def _relaunch_under_venv() -> int | None:
     import os
     import subprocess
 
+    if getattr(sys, "frozen", False):
+        return None  # a bundled build has no venv to relaunch into
     if os.environ.get("JARVIS_RELAUNCHED") == "1":
         return None  # already tried; fall through to the error dialog
 
@@ -172,8 +174,27 @@ def main() -> int:
             missing.append(f"{module} ({purpose})")
 
     if missing:
-        # Wrong interpreter is the usual cause, and it is fixable without
-        # bothering anyone about it.
+        # A frozen build has no virtual environment and never will. Telling
+        # its recipient to run `python -m venv` is advice they cannot act on
+        # and did not sign up for -- they were handed an application. If
+        # imports are failing here the bundle itself is damaged, which is
+        # exactly what happens when a folder is part-copied, part-extracted,
+        # or half-removed by a sync client.
+        if getattr(sys, "frozen", False):
+            return _fatal(
+                "This copy of JARVIS is incomplete:\n  "
+                + "\n  ".join(missing)
+                + "\n\nSome of its files are missing.\n\n"
+                "Most likely the folder was only partly copied, or the zip was\n"
+                "not fully extracted. Copy or extract the whole JARVIS folder\n"
+                "again, keeping JARVIS.exe and the _internal folder together,\n"
+                "then run it from there.\n\n"
+                "Running JARVIS.exe --selftest writes selftest.txt listing\n"
+                "exactly what is missing."
+            )
+
+        # Running from source, the usual cause is the wrong interpreter, and
+        # that is fixable without bothering anyone about it.
         relaunched = _relaunch_under_venv()
         if relaunched is not None:
             return relaunched
