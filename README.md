@@ -14,8 +14,10 @@ tool" and "the tool ran".
 
 ```
 python -m jarvis.doctor     # check everything before trusting it
-python run.py               # go
 ```
+
+Then double-click **JARVIS.vbs**, or run `python run.py` for the terminal
+version. Both drive the same agent.
 
 ---
 
@@ -145,6 +147,31 @@ the door.
 false-positive resistance, taint escalation, sandbox escapes, SSRF, secret
 redaction, model routing. They are deterministic, so they cost nothing and run
 on every change.
+
+---
+
+## The app
+
+`JARVIS.vbs` starts it with no console window at all. `python make_shortcut.py`
+puts it in the Start menu; add `--startup` to launch it at login.
+
+Closing the window hides it to the system tray — the assistant keeps running,
+scheduled jobs keep firing, and push-to-talk still works from any application.
+Quit properly from the tray menu or with `ctrl+alt+q`.
+
+The window shows what the terminal HUD showed, because a non-deterministic
+system you cannot see inside is one you debug by superstition: tool calls
+appear inline as they fire with their timings, the header carries the model,
+the quota burn-down and the security state, and detected injection takes over
+a banner across the top. The agent runs on a worker thread, so the window
+never freezes mid-turn.
+
+The one approval dialog left is the taint guard, and it defaults to Deny —
+Escape refuses, so the reflexive keystroke is the safe one.
+
+```
+python app.py       # same app, with a console for debugging
+```
 
 ---
 
