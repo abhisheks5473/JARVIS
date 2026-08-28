@@ -21,6 +21,7 @@ from . import desktop  # noqa: F401,E402
 from . import files  # noqa: F401,E402
 from . import google_ws  # noqa: F401,E402
 from . import memory_tools  # noqa: F401,E402
+from . import mouse  # noqa: F401,E402
 from . import shell  # noqa: F401,E402
 from . import system  # noqa: F401,E402
 from . import time_tools  # noqa: F401,E402
@@ -72,8 +73,16 @@ PROFILES: dict[str, set[str]] = {
     "desk": {
         "launch_app", "list_windows", "focus_window", "close_window",
         "media_control", "set_volume", "read_clipboard", "set_clipboard",
-        "send_notification", "lock_screen", "see_screen",
-        "system_stats", "list_processes", "kill_process",
+        "send_notification", "see_screen",
+        "system_stats", "list_processes",
+        "screen_info", "click_mouse", "press_keys",
+    },
+    # Point-and-click work. see_screen is the important one here: clicking
+    # without looking first is how an agent hits the wrong button.
+    "control": {
+        "see_screen", "screen_info", "move_mouse", "click_mouse", "drag_mouse",
+        "scroll_mouse", "type_text", "press_keys",
+        "list_windows", "focus_window", "launch_app", "read_clipboard",
     },
     # Reading and writing about the world.
     "research": {

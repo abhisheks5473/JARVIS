@@ -210,6 +210,15 @@ class ApprovalGate:
         tainted = bool(ledger and ledger.is_tainted)
 
         # Layer 2: taint escalation.
+        #
+        # Approval prompts are off by default now, so this is the last control
+        # between a poisoned page and a destructive action. It fires only when
+        # an actual injection signature was seen, which is why it survives the
+        # switch-off -- it is not the "confirm every write" nagging that was
+        # removed. JARVIS_TAINT_GUARD=0 disables it too.
+        if hostile and risk is Risk.DESTRUCTIVE and not config.TAINT_GUARD:
+            hostile = False
+
         if hostile and risk is Risk.DESTRUCTIVE:
             if not interactive:
                 judgement = Judgement(

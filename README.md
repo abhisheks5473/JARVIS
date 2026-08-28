@@ -38,9 +38,12 @@ turn 1:  "read this page for me"      <- the payload enters context
 turn 2:  "ok now clean up my folder"  <- the payload fires
 ```
 
-Once tainted, destructive tools require your explicit approval **regardless of
-your configured approval mode**. You can disable the approval gate for
-convenience. You cannot disable this.
+Approval prompts are **off by default** in this build — destructive actions
+run without asking, which is how the owner wants it. Two things survive that
+deliberately: the hard-deny list, which refuses rather than prompts, and this
+taint guard. It fires only when content matching a real injection signature
+has been read, not on every file write, which is why it is worth keeping when
+the nagging is not. `JARVIS_TAINT_GUARD=0` removes it too.
 
 ```
 === reading a poisoned file, then asking it to delete something ===
@@ -82,7 +85,19 @@ moves to a trash folder with a manifest; a scheduled job purges it after 30
 days. A 2% error rate is delightful for "summarise this page" and catastrophic
 for "tidy up my drafts".
 
-**6. A hard-deny list that nothing can override.**
+**6. It drives the mouse and keyboard.**
+
+`screen_info`, `move_mouse`, `click_mouse`, `drag_mouse`, `scroll_mouse`,
+`type_text`, `press_keys` — enough to operate any application, paired with
+`see_screen` so it clicks on what it has actually looked at rather than
+guessed coordinates. Coordinates are validated, never clamped: a clamped click
+is a click somewhere you did not intend.
+
+pyautogui's failsafe stays on, so **slamming the pointer into the top-left
+corner aborts whatever it is doing**, mid-action, even if the terminal is not
+focused. With approval prompts off, that is your fastest physical stop.
+
+**7. A hard-deny list that nothing can override.**
 
 `rm -rf /`, `format c:`, `vssadmin delete shadows`, `curl … | bash` and
 friends are refused before any prompt is shown — not by the model's judgement,
@@ -95,21 +110,21 @@ with approval disabled *and* a prompter that always says yes:
   vssadmin delete shadows /all      -> denied
 ```
 
-**7. A scheduled job structurally cannot approve itself.**
+**8. A scheduled job structurally cannot approve itself.**
 
 Unattended runs build their approval gate with no prompter at all. There is no
 channel through which consent could be manufactured; destructive actions are
 queued for you and reported. That is a property of the object graph, not a
 rule in a prompt.
 
-**8. It shows you what it is doing.**
+**9. It shows you what it is doing.**
 
 A live terminal HUD: which tools fired and how long they took, which model
 answered and whether it was downgraded, quota burn-down against all three
 limits, and the security state of the conversation. A non-deterministic system
 you cannot see inside is one you debug by superstition.
 
-**9. Search that actually works on the free tier.**
+**10. Search that actually works on the free tier.**
 
 Gemini's built-in `google_search` grounding tool is widely described as free
 and built in. On a free-tier key it returns **429 on every call** — verified by
@@ -124,9 +139,9 @@ Anti-bot challenge pages are detected explicitly, because reporting one as "no
 results" would have the agent claim it found nothing when it was turned away at
 the door.
 
-**10. An eval suite from day one.**
+**11. An eval suite from day one.**
 
-102 offline cases covering safety and routing — hard-deny, injection detection,
+119 offline cases covering safety and routing — hard-deny, injection detection,
 false-positive resistance, taint escalation, sandbox escapes, SSRF, secret
 redaction, model routing. They are deterministic, so they cost nothing and run
 on every change.
@@ -245,7 +260,7 @@ jarvis/
 ├── voice/             faster-whisper in, Piper out, push-to-talk
 ├── triggers/          scheduled and event-driven autonomy
 └── hud/               the display
-evals/                 102 offline cases + a live replay harness
+evals/                 119 offline cases + a live replay harness
 ```
 
 Every model ID lives in `config.py`. When Google deprecates one — and they
@@ -265,7 +280,8 @@ Decided once, in advance, rather than in the moment:
 - **No credentials.** It never handles passwords, 2FA codes or key material.
   Anything resembling a secret is redacted before it reaches the model or the
   logs, and the API key is stripped from every subprocess environment.
-- **No real deletes.** Trash, then a dated purge.
+- **No real deletes.** Trash, then a dated purge. This matters more now that
+  nothing prompts: a mistaken delete is still undoable.
 - **Files are confined** to the workspace plus Desktop, Documents and
   Downloads, checked on the resolved path so traversal and symlinks fail the
   same way. Credential files — `.env`, SSH keys, `*.pem`, token JSON — and

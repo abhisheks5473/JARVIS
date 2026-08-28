@@ -207,6 +207,15 @@ DESTRUCTIVE_TOOLS = {
     "run_tests",
     "media_control",
     "set_volume",
+    # Driving the pointer and keyboard is acting as the user. It stays in the
+    # destructive tier even with prompts off, so the taint guard still covers
+    # it: a poisoned page must not be able to click Confirm on your behalf.
+    "click_mouse",
+    "drag_mouse",
+    "type_text",
+    "press_keys",
+    "move_mouse",
+    "scroll_mouse",
 }
 
 # Tools that ingest content JARVIS did not author. Calling one of these marks
@@ -222,7 +231,23 @@ UNTRUSTED_SOURCE_TOOLS = {
     "search_files",
 }
 
-APPROVAL_MODE = os.getenv("JARVIS_APPROVAL", "smart")  # always | smart | never
+# always | smart | never
+#
+# Defaults to `never` at the owner's explicit request: destructive tools run
+# without asking. Two things survive that choice, deliberately:
+#
+#   * SHELL_HARD_DENY below. It never prompts -- it refuses -- so switching
+#     prompts off does not touch it.
+#   * TAINT_GUARD, immediately after. Approval prompts existed mostly to stop
+#     a poisoned web page from turning "summarise this" into "delete that".
+#     With prompts gone, this is the last thing standing between the two.
+APPROVAL_MODE = os.getenv("JARVIS_APPROVAL", "never")
+
+# When content matching injection signatures has been ingested, still ask
+# before a destructive action. This is the only prompt left in normal
+# operation, and it fires only when an actual attack signature was seen --
+# not on every file write. Set JARVIS_TAINT_GUARD=0 for no prompts, ever.
+TAINT_GUARD = os.getenv("JARVIS_TAINT_GUARD", "1") == "1"
 AUTONOMOUS_MAY_APPROVE = False  # scheduled jobs never self-approve. Non-negotiable.
 
 # Real deletes become a move to TRASH_DIR, emptied after N days by a

@@ -116,11 +116,17 @@ _PROFILE_SIGNALS: list[tuple[str, re.Pattern[str]]] = [
     ("recovery", re.compile(
         r"\b(trash|restore|recover|deleted it|undelete|recycle bin)\b", re.I)),
     ("briefing", re.compile(
-        r"\b(calendar|schedule|meeting|appointment|email|inbox|unread|"
-        r"briefing|agenda)\b", re.I)),
+        r"\b(calendar|schedule|appointment|inbox|unread|briefing|agenda)\b", re.I)),
     ("dev", re.compile(
         r"\b(git|commit|branch|repo|pytest|build|compile|stack trace|"
         r"traceback|lint|shell|powershell|script)\b", re.I)),
+    # Driving the pointer. Checked before "desk" because "click the button in
+    # that window" is a pointer job, not a window-management one.
+    ("control", re.compile(
+        r"\b(click|double.?click|right.?click|drag|scroll|hover|cursor|"
+        r"pointer|mouse|button|checkbox|dropdown|text ?box|"
+        r"type\s+(it|in|into|out|the)|press\s+\w+|select\s+the|fill\s+in)\b",
+        re.I)),
     ("desk", re.compile(
         r"\b(open|launch|close|window|volume|louder|quieter|mute|play|pause|"
         r"skip|next track|clipboard|lock|spotify|chrome|process|"
