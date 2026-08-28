@@ -110,6 +110,24 @@ def main() -> int:
         )
 
     try:
+        from jarvis.app.setup_wizard import needs_setup, run_setup
+
+        # First run on someone else's machine: they have no key and no idea
+        # they need one. Ask before building a window that cannot think.
+        if needs_setup():
+            if not run_setup():
+                return 0  # they quit the wizard; not an error
+            # config read .env at import time, so re-read it now that one
+            # exists, rather than starting a keyless agent.
+            import importlib
+
+            from dotenv import load_dotenv
+
+            from jarvis import config as _config
+
+            load_dotenv(_config.ENV_FILE, override=True)
+            importlib.reload(_config)
+
         from jarvis.app.tray import Tray
         from jarvis.app.window import JarvisWindow
 

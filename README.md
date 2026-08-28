@@ -193,6 +193,37 @@ the wrong Python.
 
 ---
 
+## Sharing it with someone else
+
+```bash
+pip install pyinstaller
+python build_exe.py            # everything, voice included
+python build_exe.py --lite     # no voice or Google Workspace, much smaller
+```
+
+That produces `dist/JARVIS/` — zip it and send it. The recipient needs
+**nothing** installed: no Python, no pip, no virtual environment. Everything is
+bundled at build time, which is deliberate: asking someone you sent an app to
+run `pip install` is asking them to give up.
+
+On first launch they get a setup wizard that explains where to find a free
+Google API key, opens the page for them, **verifies the key against the API
+before accepting it**, and writes the settings file. A typo caught at that
+moment is a sentence of feedback; a typo saved silently is a baffling failure
+ten minutes later in a different part of the program.
+
+A frozen build keeps its data in `%LOCALAPPDATA%\JARVIS` rather than beside
+the executable, because PyInstaller unpacks to a temporary directory that is
+deleted on exit — writing memory and logs there would silently lose all of it
+between runs.
+
+Two honest caveats. The full build is large, mostly `googleapiclient` (100 MB)
+and the voice stack (about 210 MB); `--lite` drops both. And it is not
+code-signed, so Windows shows an "unknown publisher" warning — the generated
+`READ ME FIRST.txt` tells your recipient to click More info, then Run anyway.
+
+---
+
 ## Setup
 
 You need a Google account and about five minutes. No credit card.

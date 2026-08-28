@@ -9,13 +9,47 @@ Run `python -m jarvis.doctor` to check these IDs against the live API.
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
 
-ROOT = Path(__file__).resolve().parent.parent
+def _root() -> Path:
+    """Where this installation keeps its data.
+
+    Under a PyInstaller bundle `__file__` points into a temporary extraction
+    directory that is deleted on exit, so writing memory, logs and .env there
+    would silently lose all of it between runs. A frozen build therefore keeps
+    its state in %LOCALAPPDATA%\\JARVIS, which survives, is writable without
+    administrator rights, and does not sit inside Program Files.
+
+    Running from source keeps everything in the project folder, where it is
+    easy to inspect.
+    """
+    if getattr(sys, "frozen", False):
+        base = os.getenv("LOCALAPPDATA") or os.path.expanduser("~")
+        home = Path(base) / "JARVIS"
+        home.mkdir(parents=True, exist_ok=True)
+        return home
+    return Path(__file__).resolve().parent.parent
+
+
+ROOT = _root()
+IS_FROZEN = bool(getattr(sys, "frozen", False))
+
+# Where the executable itself lives, for a bundled build. Someone who drops a
+# .env next to the exe reasonably expects it to be read.
+BUNDLE_DIR = (
+    Path(sys.executable).resolve().parent if IS_FROZEN
+    else Path(__file__).resolve().parent.parent
+)
+
 load_dotenv(ROOT / ".env")
+if IS_FROZEN:
+    load_dotenv(BUNDLE_DIR / ".env")  # does not override what is already set
+
+ENV_FILE = ROOT / ".env"
 
 # ---------------------------------------------------------------- paths
 WORKSPACE = Path(os.getenv("JARVIS_WORKSPACE", str(ROOT / "workspace"))).resolve()

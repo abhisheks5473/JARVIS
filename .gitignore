@@ -4,6 +4,12 @@ data/google_token.json
 *.credentials.json
 client_secret*.json
 
+# Build artefacts. The exe is hundreds of MB; ship it as a release, not a
+# commit.
+dist/
+build/
+*.spec
+
 # Runtime state
 .venv/
 data/
