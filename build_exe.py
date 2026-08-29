@@ -186,15 +186,45 @@ def build(lite: bool = False, onefile: bool = False) -> int:
     # A README beside the exe, because the person receiving it did not read
     # anything else.
     readme = (DIST if onefile else target) / "READ ME FIRST.txt"
+    folder_note = (
+        ""
+        if onefile
+        else (
+            "EXTRACT THE WHOLE FOLDER FIRST\n"
+            "------------------------------\n"
+            "Do not drag JARVIS.exe out of the zip on its own. It needs the\n"
+            "_internal folder sitting next to it. Right-click the zip, choose\n"
+            "Extract All, and run JARVIS.exe from the extracted folder.\n\n"
+            "Running it from inside the zip viewer does not work either:\n"
+            "Windows only unpacks the one file you double-clicked.\n\n"
+        )
+    )
+
     readme.write_text(
         "JARVIS\n"
         "======\n\n"
-        "Double-click JARVIS.exe.\n\n"
+        + folder_note
+        + "Double-click JARVIS.exe.\n\n"
         "The first time it runs it asks for a Google API key and shows you\n"
         "exactly where to get one. It is free, takes about a minute, and does\n"
         "not need a credit card.\n\n"
-        "Windows may warn that the publisher is unknown, because this is not\n"
+        "IF WINDOWS BLOCKS IT\n"
+        "--------------------\n"
+        "SmartScreen will say the publisher is unknown, because this is not\n"
         "code-signed. Click More info, then Run anyway.\n\n"
+        "Antivirus sometimes deletes parts of apps built this way. It is a\n"
+        "false positive, but the result is a half-removed app that starts and\n"
+        "then complains a component is missing. If that happens, restore the\n"
+        "files from quarantine or add this folder to the exclusions, then\n"
+        "extract again.\n\n"
+        "IF IT WILL NOT START\n"
+        "--------------------\n"
+        "Open a Command Prompt in this folder and run:\n"
+        "  JARVIS.exe --selftest\n"
+        "That writes selftest.txt listing every component and whether it\n"
+        "loaded. Send that file to whoever gave you this.\n\n"
+        "PRIVACY\n"
+        "-------\n"
         "Your key and conversation history stay on this computer, under:\n"
         "  %LOCALAPPDATA%\\JARVIS\n\n"
         "To remove it: delete this folder and that one.\n",

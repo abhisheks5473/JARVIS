@@ -197,9 +197,16 @@ the wrong Python.
 
 ```bash
 pip install pyinstaller
-python build_exe.py            # everything, voice included
-python build_exe.py --lite     # no voice or Google Workspace, much smaller
+python build_exe.py --onefile --lite   # 47 MB, ONE file  <- share this
+python build_exe.py                    # 434 MB folder, voice included
 ```
+
+**Share the one-file build.** A folder build is a trap: people drag `JARVIS.exe`
+out of the zip and leave the `_internal` folder behind, or run it from inside
+the zip viewer, which unpacks only the file they clicked. Either way it starts
+and then reports a missing component, which looks like your bug rather than
+their extraction. One file cannot be partly extracted. It opens in about two
+seconds and costs only the voice stack and calendar.
 
 The result lands in `%LOCALAPPDATA%\JARVIS-build\dist\JARVIS` — zip that folder
 and send it. It builds outside the project deliberately: this repository sits

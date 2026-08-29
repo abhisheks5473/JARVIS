@@ -89,7 +89,8 @@ def _selftest() -> int:
     import platform
     from datetime import datetime
 
-    checks = [
+    # Required: without these there is no application.
+    required = [
         ("customtkinter", "the window"),
         ("pystray", "tray icon"),
         ("PIL", "icons and screenshot scaling"),
@@ -105,6 +106,12 @@ def _selftest() -> int:
         ("win32api", "media keys"),
         ("apscheduler", "scheduled jobs"),
         ("sqlite3", "memory and quota"),
+    ]
+
+    # Optional: the lite build leaves these out on purpose. Reporting their
+    # absence as a failure told the reader the app was damaged when it was
+    # merely smaller, which is the opposite of what a diagnostic is for.
+    optional = [
         ("faster_whisper", "speech to text"),
         ("ctranslate2", "speech to text engine"),
         ("sounddevice", "microphone and speaker"),
@@ -122,13 +129,22 @@ def _selftest() -> int:
         "",
     ]
     failed = 0
-    for module, purpose in checks:
+    for module, purpose in required:
         try:
             __import__(module)
             lines.append(f"  ok    {module:18} {purpose}")
         except Exception as exc:  # noqa: BLE001
             failed += 1
             lines.append(f"  FAIL  {module:18} {purpose} -- {type(exc).__name__}: {exc}")
+
+    absent = 0
+    for module, purpose in optional:
+        try:
+            __import__(module)
+            lines.append(f"  ok    {module:18} {purpose}")
+        except Exception:  # noqa: BLE001
+            absent += 1
+            lines.append(f"  --    {module:18} {purpose} (not in this build)")
 
     try:
         from jarvis import config
@@ -144,7 +160,19 @@ def _selftest() -> int:
         failed += 1
         lines.append(f"  FAIL  jarvis core -- {type(exc).__name__}: {exc}")
 
-    lines += ["", f"{failed} failure(s)" if failed else "all subsystems available"]
+    if failed:
+        verdict = (
+            f"{failed} required component(s) missing -- this copy is damaged. "
+            "Extract the whole folder again, or check antivirus quarantine."
+        )
+    elif absent:
+        verdict = (
+            f"Working. {absent} optional component(s) not included in this "
+            "build (voice and calendar are left out of the lite build)."
+        )
+    else:
+        verdict = "Working. All subsystems available."
+    lines += ["", verdict]
     report = "\n".join(lines)
 
     for target in (Path(sys.executable).parent / "selftest.txt", ROOT / "selftest.txt"):
