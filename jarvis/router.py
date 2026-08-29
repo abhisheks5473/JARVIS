@@ -117,11 +117,18 @@ _PROFILE_SIGNALS: list[tuple[str, re.Pattern[str]]] = [
         r"\b(trash|restore|recover|deleted it|undelete|recycle bin)\b", re.I)),
     ("briefing", re.compile(
         r"\b(calendar|schedule|appointment|inbox|unread|briefing|agenda)\b", re.I)),
+    # Producing a file. Checked early: "make a pdf of my calendar" is a
+    # document job that happens to mention a calendar.
+    ("create", re.compile(
+        r"\b(pdf|docx?|word\s+doc|excel|xlsx|spreadsheet|powerpoint|pptx|"
+        r"slideshow|deck|mp3|mp4|wav|m4a|gif|audio|video|narration|voiceover|"
+        r"thumbnail|resize|report|invoice|certificate)\b|"
+        r"\b(convert|export|save)\b[^\n]{0,20}\b(to|into|as)\b", re.I)),
     ("dev", re.compile(
         r"\b(git|commit|branch|repo|pytest|build|compile|stack trace|"
         r"traceback|lint|shell|powershell|script)\b", re.I)),
-    # Driving the pointer. Checked before "desk" because "click the button in
-    # that window" is a pointer job, not a window-management one.
+    # Driving the pointer. Before "desk" because "click the button in that
+    # window" is a pointer job, not a window-management one.
     ("control", re.compile(
         r"\b(click|double.?click|right.?click|drag|scroll|hover|cursor|"
         r"pointer|mouse|button|checkbox|dropdown|text ?box|"

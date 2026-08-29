@@ -441,6 +441,65 @@ def run_offline(suite: Suite) -> None:
               len(_web._CACHE) <= _web._CACHE_MAX, str(len(_web._CACHE)))
     _web._CACHE.clear()
 
+    # -- document and media creation. The PDF path is here because
+    # multi_cell(w=0) throws "Not enough horizontal space" whenever the cursor
+    # is not at the left margin, which is easy to reintroduce and only shows
+    # up on real content.
+    _out = config.WORKSPACE / "_eval_media"
+    _out.mkdir(exist_ok=True)
+    try:
+        _long = "# Title\n\n" + ("a long unbroken paragraph " * 40) + "\n\n## Section\n- one"
+        for _fmt in ("pdf", "docx", "xlsx", "pptx", "csv", "html", "md", "txt"):
+            _body = "A,B\n1,2" if _fmt == "xlsx" else _long
+            _r = _registry.dispatch(
+                "create_document",
+                {"path": f"_eval_media/doc", "content": _body, "format": _fmt,
+                 "title": "A title long enough that it must wrap onto a second line"},
+            )
+            suite.add(f"create {_fmt}", "error" not in _r, str(_r)[:70])
+
+        _r = _registry.dispatch("read_document", {"path": "_eval_media/doc.pdf"})
+        suite.add("read pdf back", bool(_r.get("text")), str(_r)[:60])
+
+        from PIL import Image as _Img
+
+        for _i in range(2):
+            _Img.new("RGB", (320, 240), (30 * _i, 90, 160)).save(_out / f"i{_i}.png")
+        _r = _registry.dispatch(
+            "create_video",
+            {"images": ["_eval_media/i0.png", "_eval_media/i1.png"],
+             "path": "_eval_media/clip", "seconds_each": 0.3},
+        )
+        suite.add("create mp4", "error" not in _r, str(_r)[:70])
+        _r = _registry.dispatch(
+            "edit_image",
+            {"source": "_eval_media/i0.png", "destination": "_eval_media/s.jpg",
+             "width": 160},
+        )
+        suite.add("resize image", "error" not in _r, str(_r)[:70])
+        _r = _registry.dispatch("media_info", {"path": "_eval_media/clip.mp4"})
+        suite.add("media_info reads mp4", _r.get("kind") == "video", str(_r)[:60])
+
+        # a silent video must say so, not "no audio or video"
+        _r = _registry.dispatch(
+            "convert_media",
+            {"source": "_eval_media/clip.mp4", "destination": "_eval_media/x.mp3"},
+        )
+        suite.add("silent video explains itself",
+                  "no audio track" in str(_r.get("error", "")), str(_r)[:70])
+
+        # creation must obey the same path guard as every other file tool
+        for _bad in ("Desktop/JARVIS/.env", "../../../Windows/x.pdf"):
+            _r = _registry.dispatch(
+                "create_document",
+                {"path": _bad, "content": "x", "format": "pdf"},
+            )
+            suite.add(f"create refuses {_bad[:22]}", "error" in _r, str(_r)[:60])
+    finally:
+        import shutil as _sh
+
+        _sh.rmtree(_out, ignore_errors=True)
+
     # -- SSRF guard
     from jarvis.tools.web import _check_url
 

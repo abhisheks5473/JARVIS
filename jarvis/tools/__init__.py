@@ -18,8 +18,10 @@ from .base import Registry, ToolError, ToolSpec, registry, tool
 
 # Import for side effects: each module registers its tools on import.
 from . import desktop  # noqa: F401,E402
+from . import documents  # noqa: F401,E402
 from . import files  # noqa: F401,E402
 from . import google_ws  # noqa: F401,E402
+from . import media  # noqa: F401,E402
 from . import memory_tools  # noqa: F401,E402
 from . import mouse  # noqa: F401,E402
 from . import shell  # noqa: F401,E402
@@ -63,9 +65,15 @@ PROFILES: dict[str, set[str]] = {
         "web_search", "fetch_url",
         "see_screen",
         "launch_app", "list_windows", "focus_window", "media_control",
-        "read_clipboard", "send_notification",
-        "system_stats",
+        "read_clipboard",
+        "create_document", "create_audio",
         "date_math",
+    },
+    # Producing files: documents, audio, video, images.
+    "create": {
+        "create_document", "read_document", "create_audio", "create_video",
+        "convert_media", "edit_image", "media_info",
+        "read_file", "list_directory", "see_screen", "write_file",
     },
     # Conversation only. For when quota is nearly gone.
     "minimal": set(),

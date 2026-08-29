@@ -45,3 +45,14 @@ google-auth-httplib2>=0.2.0
 
 # --- only needed to BUILD the shareable .exe -------------------------------
 # pip install pyinstaller
+
+# --- making documents and media -------------------------------------------
+# Audio and video need no ffmpeg binary: PyAV (already above, for speech)
+# carries its own libav with mp3, aac, h264 and gif encoders. That matters
+# most for the shipped .exe, where asking a recipient to install ffmpeg and
+# put it on PATH would end the conversation.
+fpdf2>=2.7.0
+python-docx>=1.1.0
+openpyxl>=3.1.0
+python-pptx>=0.6.23
+pypdf>=4.0.0
