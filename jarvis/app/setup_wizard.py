@@ -6,21 +6,26 @@ the first thing they meet is a window saying "GEMINI_API_KEY is not set", they
 close it and never open it again.
 
 So this asks for exactly one thing, says precisely where to find it, opens the
-page for them, checks the key actually works before accepting it, and writes
-the .env itself. Everything else gets a sensible default.
+page for them, and writes the .env itself. Everything else gets a sensible
+default.
 
-Three details that matter more than they look:
+It used to call Google to confirm the key before accepting it. That read well
+and behaved badly: on a machine behind a proxy, a captive portal, or simply
+offline, the check became the only thing between the user and a working app,
+and setup could not finish on exactly the machines that most needed a clear
+explanation. It also required a worker thread, and that thread touched Tk
+widgets from off the main thread, which throws where nobody can see it.
 
-  * **The key is verified, not just stored.** A typo saved silently becomes a
-    confusing failure ten minutes later in a different part of the program.
-  * **Verification runs off the UI thread.** A network call on the main thread
-    freezes the window, which reads as a crash.
+Now the key is checked for shape and saved. A key that is subtly wrong is
+reported by the first message instead, which is a better place to learn it
+than a setup screen that cannot complete.
+
+  * **No network, no threads.** Setup finishes on any machine, instantly.
   * **The key is never echoed back or logged.** It goes from the field to the
     .env and nowhere else.
 """
 from __future__ import annotations
 
-import threading
 import webbrowser
 from pathlib import Path
 
@@ -45,7 +50,7 @@ STEPS = [
     "Sign in with any Google account. A personal one is fine.",
     'Click "Create API key", then "Create API key in new project".',
     "Copy the key it shows you.",
-    "Paste it in the box below and press Verify.",
+    "Paste it in the box below and press Save.",
 ]
 
 
@@ -83,72 +88,26 @@ def write_env(api_key: str, user_name: str = "", assistant_name: str = "") -> Pa
     return target
 
 
-# Long enough for a slow connection, short enough that a blocked one gets
-# reported rather than waited on. Without this the SDK waits indefinitely and
-# the wizard sat on "Checking..." forever, with no way out.
-VERIFY_TIMEOUT_S = 25
+def key_format_problem(api_key: str) -> str:
+    """Return a complaint about the key's shape, or "" if it looks usable.
 
-
-def verify_key(api_key: str) -> tuple[bool, str]:
-    """Ask Google whether this key is real.
-
-    Listing models authenticates without spending generation quota, so a
-    mistyped key costs the user nothing to discover.
-
-    Two things here are load-bearing:
-
-    * **An explicit timeout.** The default is none at all, so on a network
-      that silently drops the connection -- a captive portal, a corporate
-      proxy, a firewall -- this blocked forever.
-    * **Only the first model is read.** `models.list()` returns a pager, and
-      draining it fetches every page. One model is all the proof needed that
-      the key authenticates.
+    Shape only. Setup deliberately does not phone Google: on a blocked or
+    offline network that check cannot succeed, and making it the gate meant
+    setup could not finish on exactly the machines that most needed a clear
+    explanation. Catching a paste that is obviously wrong is cheap and works
+    everywhere; catching a key that is subtly wrong is the first message's
+    job, where the error can say so directly.
     """
     key = api_key.strip()
     if not key:
-        return False, "Paste your key first."
-    if len(key) < 20 or " " in key:
-        return False, "That does not look like a key. Copy the whole thing."
-
-    try:
-        import os
-
-        from google import genai
-
-        os.environ["GEMINI_API_KEY"] = key
-        client = genai.Client(
-            api_key=key,
-            http_options={"timeout": VERIFY_TIMEOUT_S * 1000},  # milliseconds
-        )
-        names = []
-        for model in client.models.list():
-            names.append(model.name)
-            break  # one is enough; do not walk every page
-    except Exception as exc:  # noqa: BLE001 - any failure is a failed key
-        detail = str(exc)
-        if "API_KEY_INVALID" in detail or "API key not valid" in detail:
-            return False, "Google rejected that key. Check you copied all of it."
-        if "PERMISSION_DENIED" in detail or "403" in detail:
-            return False, "That key exists but is not permitted to use the API."
-        if any(
-            word in detail.lower()
-            for word in ("timeout", "timed out", "connect", "ssl", "resolve", "network")
-        ):
-            return False, (
-                "Could not reach Google. This computer may be offline, behind a "
-                "proxy, or on a network that blocks it. Check the connection and "
-                "try again."
-            )
-        return (
-            False,
-            f"Could not reach Google ({type(exc).__name__}). Check your connection.",
-        )
-
-    if not names:
-        return False, "The key works but no models are visible to it."
-    # Deliberately no count: only the first page's first model was read, so
-    # any number here would be a number this function did not measure.
-    return True, "Verified."
+        return "Paste your key first."
+    if " " in key or "\n" in key:
+        return "That has a space in it. Copy the key on its own."
+    if len(key) < 20:
+        return "That looks too short. Copy the whole key."
+    if key.lower().startswith(("http://", "https://")):
+        return "That is a web address, not a key. Copy the key from the page."
+    return ""
 
 
 class SetupWizard(ctk.CTkToplevel):
@@ -157,7 +116,6 @@ class SetupWizard(ctk.CTkToplevel):
     def __init__(self, master=None) -> None:
         super().__init__(master)
         self.completed = False
-        self._attempt = 0
 
         self.title("Welcome to JARVIS")
         self.configure(fg_color=BG)
@@ -244,7 +202,7 @@ class SetupWizard(ctk.CTkToplevel):
         buttons = ctk.CTkFrame(self, fg_color="transparent")
         buttons.pack(fill="x", padx=30, pady=(16, 22), side="bottom")
         self.verify_button = ctk.CTkButton(
-            buttons, text="Verify and start", height=44, fg_color=ACCENT,
+            buttons, text="Save and start", height=44, fg_color=ACCENT,
             hover_color="#1f6feb", command=self._verify,
         )
         self.verify_button.pack(side="right")
@@ -265,62 +223,38 @@ class SetupWizard(ctk.CTkToplevel):
         self.message.configure(text=text, text_color=colour)
 
     def _verify(self) -> None:
+        """Save the key and start. No network call.
+
+        This used to phone Google to confirm the key before accepting it,
+        which was a nice idea and a bad one in practice: on a network that
+        blocks or silently drops the connection the check is the only thing
+        standing between the user and a working app, and it turned setup into
+        a wait with nothing to show for it.
+
+        Worse, it needed a worker thread, and that thread called `self.after`
+        on a widget the user might already have closed -- Tk is not
+        thread-safe there, and it threw from inside the thread where nobody
+        could see it.
+
+        The key is checked for shape only and written. If it is wrong, the
+        first message says so plainly, which is a better place to find out
+        than a setup screen that cannot finish.
+        """
         key = self.entry.get().strip()
-        if not key:
-            self._say("Paste your key first.", ALARM)
-            return
 
-        self.verify_button.configure(state="disabled", text="Checking...")
-        self._say("Asking Google whether that key works...", MUTED)
-        self._attempt += 1
-
-        # Off the UI thread: a network call here would freeze the window and
-        # look like a crash.
-        threading.Thread(target=self._verify_worker, args=(key,), daemon=True).start()
-
-        # A belt-and-braces watchdog. The timeout inside verify_key should
-        # always fire first, but a hung socket that ignores it would otherwise
-        # leave this window on "Checking..." indefinitely -- which is exactly
-        # what happened, and a stuck button with no explanation is the worst
-        # possible first impression.
-        self.after(
-            (VERIFY_TIMEOUT_S + 8) * 1000,
-            lambda a=self._attempt: self._verify_stalled(a),
-        )
-
-    def _verify_stalled(self, attempt: int) -> None:
-        if attempt != self._attempt or self.completed:
-            return  # a result already arrived, or a newer attempt superseded this
-        self.verify_button.configure(state="normal", text="Verify and start")
-        self._say(
-            "No answer from Google after "
-            f"{VERIFY_TIMEOUT_S + 8} seconds. This computer may be offline, "
-            "behind a proxy, or on a network that blocks Google. You can try "
-            "again, or quit and set the key up later.",
-            ALARM,
-        )
-
-    def _verify_worker(self, key: str) -> None:
-        ok, message = verify_key(key)
-        self.after(0, lambda: self._verify_done(key, ok, message))
-
-    def _verify_done(self, key: str, ok: bool, message: str) -> None:
-        self._attempt += 1  # any pending watchdog for the old attempt goes quiet
-        self.verify_button.configure(state="normal", text="Verify and start")
-        if not ok:
-            self._say(message, ALARM)
+        problem = key_format_problem(key)
+        if problem:
+            self._say(problem, ALARM)
             return
 
         try:
             path = write_env(key, self.user_entry.get(), self.name_entry.get())
         except OSError as exc:
-            self._say(
-                f"Key is good, but the settings file could not be saved: {exc}", ALARM
-            )
+            self._say(f"Could not save your settings: {exc}", ALARM)
             return
 
         self.completed = True
-        self._say(f"{message} Saved to {path}. Starting...", GOOD)
+        self._say(f"Saved to {path}. Starting...", GOOD)
         self.after(900, self._finish)
 
     def _finish(self) -> None:
