@@ -254,32 +254,86 @@ anyone cautious to be suspicious, and rightly so.
 
 ## Setup
 
-You need a Google account and about five minutes. No credit card.
+Five steps, about ten minutes, most of it waiting for downloads. You need a
+Google account. No credit card.
+
+### 1. Install Python 3.11 or newer
+
+From **python.org/downloads**. Tick **"Add python.exe to PATH"** on the first
+screen of the installer — if you miss it, the commands below will not be found.
+
+Check it worked:
+
+```bash
+python --version
+```
+
+### 2. Get the code
+
+```bash
+git clone https://github.com/abhisheks5473/JARVIS.git
+```
+
+No git? Use the green **Code** button on GitHub, **Download ZIP**, and extract
+it. Then open a terminal in the folder:
+
+```bash
+cd JARVIS
+```
+
+### 3. Create the virtual environment
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
 ```
 
-Get a free API key at **aistudio.google.com/apikey**, then:
+This makes a private Python for the project so its packages cannot collide
+with anything else on your machine.
+
+### 4. Install the dependencies
 
 ```bash
-copy .env.example .env
+.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-Put the key in `.env` as `GEMINI_API_KEY=...`, then check everything:
+About 500 MB and a few minutes. Most of it is the offline speech engine, which
+is why your voice never leaves the machine.
+
+### 5. Start it
 
 ```bash
-python -m jarvis.doctor
+.venv\Scripts\python.exe app.py
 ```
 
-The doctor asks your key which models actually exist and compares them against
-`config.py`. Google deprecates model IDs on their own schedule, so trust it
-over any documentation, including this file.
+**The first launch asks for your API key and shows you where to get one** — it
+opens Google AI Studio for you, and checks the key works before saving it. You
+do not need to create `.env` by hand.
+
+That is the whole setup.
+
+### Make it double-clickable
 
 ```bash
-python run.py
+.venv\Scripts\python.exe make_shortcut.py
+```
+
+Puts **JARVIS** on your Desktop and in the Start menu, so you never touch a
+terminal again. Add `--startup` to launch it when you log in.
+
+### If something goes wrong
+
+```bash
+.venv\Scripts\python.exe -m jarvis.doctor
+```
+
+Checks paths, packages, security controls, quota, and asks your key which
+models actually exist — Google retires model IDs on their own schedule, so
+trust the doctor over any documentation, including this file.
+
+Prefer the terminal version?
+
+```bash
+.venv\Scripts\python.exe run.py
 ```
 
 ### Set your real quota numbers

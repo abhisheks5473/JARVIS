@@ -5,6 +5,14 @@ python-dotenv>=1.0.0
 # --- terminal HUD -----------------------------------------------------------
 rich>=13.7.0
 
+# --- the desktop app ------------------------------------------------------
+# Missing from this file until a clean-clone test caught it: the app imports
+# both, so without them `python app.py` fails on a fresh machine with
+# "customtkinter (the window)" -- which reads as a broken download rather
+# than a missing dependency.
+customtkinter>=5.2.0
+pystray>=0.19.5
+
 # --- eyes -------------------------------------------------------------------
 mss>=9.0.1
 Pillow>=10.0.0
