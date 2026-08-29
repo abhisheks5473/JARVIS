@@ -28,8 +28,24 @@ TIMEOUT_S = 15
 
 # Weather does not change in ninety seconds. Caching tool results is one of
 # the cheapest quota wins available, because a cache hit costs zero requests.
+#
+# Bounded, because this process is meant to run for weeks. Entries hold whole
+# pages and result sets, so an uncapped dict is a slow leak in exactly the
+# workload the cache exists to serve. Insertion order is eviction order, which
+# is close enough to oldest-first without the bookkeeping.
 _CACHE: dict[str, tuple[float, dict]] = {}
 _CACHE_TTL = 300.0
+_CACHE_MAX = 128
+
+
+def _cache_put(key: str, payload: dict) -> None:
+    """Store a result, dropping expired and then oldest entries to stay bounded."""
+    now = time.time()
+    for stale in [k for k, (at, _) in _CACHE.items() if now - at > _CACHE_TTL]:
+        _CACHE.pop(stale, None)
+    while len(_CACHE) >= _CACHE_MAX:
+        _CACHE.pop(next(iter(_CACHE)))
+    _CACHE[key] = (now, payload)
 
 # Never let the agent fetch machine-local or private-network addresses. An
 # injected "fetch http://169.254.169.254/..." is how cloud credentials leak,
@@ -159,7 +175,7 @@ def web_search(query: str, max_results: int = 6) -> dict:
                 "source": name,
                 "cached": False,
             }
-            _CACHE[cache_key] = (time.time(), payload)
+            _cache_put(cache_key, payload)
             return payload
 
     raise ToolError(
@@ -389,5 +405,5 @@ def fetch_url(url: str, max_chars: int = MAX_CHARS) -> dict:
         "truncated": len(text) > limit,
         "cached": False,
     }
-    _CACHE[target] = (time.time(), payload)
+    _cache_put(target, payload)
     return payload

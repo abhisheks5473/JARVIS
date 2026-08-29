@@ -20,7 +20,7 @@ import queue
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Callable
+from collections.abc import Callable
 
 
 @dataclass

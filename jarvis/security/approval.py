@@ -31,7 +31,7 @@ import re
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable
+from collections.abc import Callable
 
 from .. import config
 from .taint import TaintLedger

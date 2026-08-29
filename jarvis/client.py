@@ -22,7 +22,8 @@ import os
 import random
 import time
 from dataclasses import dataclass, field
-from typing import Any, Iterator
+from typing import Any
+from collections.abc import Iterator
 
 from google import genai
 from google.genai import errors

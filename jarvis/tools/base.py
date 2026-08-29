@@ -31,7 +31,8 @@ import inspect
 import re
 import typing
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, get_args, get_origin
+from typing import Any, Literal, get_args, get_origin
+from collections.abc import Callable
 
 _PRIMITIVES: dict[Any, str] = {
     str: "string",

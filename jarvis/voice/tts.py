@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 import threading
 from pathlib import Path
-from typing import Iterable
+from collections.abc import Iterable
 
 from .. import config
 

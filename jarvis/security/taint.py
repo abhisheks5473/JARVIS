@@ -288,12 +288,23 @@ class TaintEvent:
 class TaintLedger:
     """Tracks whether this conversation has ingested untrusted content."""
 
+    # An always-on assistant makes thousands of tool calls, and every one that
+    # read untrusted content appended an event forever. The list is capped --
+    # but capping it naively would have been a security bug: `level` was the
+    # maximum over the surviving events, so trimming away the single ACTIVE
+    # entry would silently drop the conversation back to CLEAN and disarm the
+    # taint guard. The level is therefore a high-water mark that trimming
+    # cannot lower; only `clear()`, which is user-initiated, resets it.
+    MAX_EVENTS = 200
+
     def __init__(self) -> None:
         self.events: list[TaintEvent] = []
+        self._peak: Level = Level.CLEAN
 
     @property
     def level(self) -> Level:
-        return max((e.level for e in self.events), default=Level.CLEAN)
+        seen = max((e.level for e in self.events), default=Level.CLEAN)
+        return max(self._peak, seen)
 
     @property
     def is_tainted(self) -> bool:
@@ -306,6 +317,7 @@ class TaintLedger:
     def note(self, tool: str, content: str) -> ScanResult:
         """Record an ingestion of untrusted content and return the scan."""
         result = scan(content)
+        self._peak = max(self._peak, result.level)
         self.events.append(
             TaintEvent(
                 at=time.time(),
@@ -315,6 +327,14 @@ class TaintLedger:
                 score=result.score,
             )
         )
+        # Keep the newest, and always keep every hostile one: those are the
+        # events `explain()` shows the user, and losing them would leave the
+        # guard armed with nothing to say about why.
+        if len(self.events) > self.MAX_EVENTS:
+            hostile = [e for e in self.events if e.level >= Level.ACTIVE]
+            recent = self.events[-(self.MAX_EVENTS // 2):]
+            seen_ids = {id(e) for e in recent}
+            self.events = [e for e in hostile if id(e) not in seen_ids] + recent
         return result
 
     def hostile_events(self) -> list[TaintEvent]:
@@ -343,3 +363,4 @@ class TaintLedger:
         otherwise an injection would simply ask to be forgiven.
         """
         self.events.clear()
+        self._peak = Level.CLEAN

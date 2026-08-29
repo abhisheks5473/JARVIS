@@ -23,7 +23,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from collections.abc import Callable
 
 from .. import config
 from ..logging_setup import log, transcript

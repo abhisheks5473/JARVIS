@@ -415,6 +415,32 @@ def run_offline(suite: Suite) -> None:
     suite.add("type_text refuses a wall of text",
               "error" in _registry.dispatch("type_text", {"text": "x" * 6000}), "")
 
+    # -- long-running state must stay bounded, and bounding it must not
+    # weaken the taint guard. Capping the ledger naively would have: `level`
+    # was the max over surviving events, so trimming the one ACTIVE entry
+    # would drop the conversation back to CLEAN and silently disarm the guard.
+    _led = TaintLedger()
+    _led.note("fetch_url", attacks[0])
+    for _ in range(1200):
+        _led.note("read_file", "entirely harmless file content")
+    suite.add("taint survives 1200 benign events", _led.is_hostile,
+              f"level={_led.level.name}")
+    suite.add("taint ledger stays bounded",
+              len(_led.events) <= TaintLedger.MAX_EVENTS, str(len(_led.events)))
+    suite.add("hostile detail still explainable",
+              "override" in _led.explain() or "credentials" in _led.explain(),
+              _led.explain()[:60])
+    _led.clear()
+    suite.add("user can still clear it", not _led.is_tainted, _led.level.name)
+
+    from jarvis.tools import web as _web
+
+    for _i in range(_web._CACHE_MAX * 3):
+        _web._cache_put(f"search:probe {_i}", {"results": [1, 2, 3]})
+    suite.add("web cache stays bounded",
+              len(_web._CACHE) <= _web._CACHE_MAX, str(len(_web._CACHE)))
+    _web._CACHE.clear()
+
     # -- SSRF guard
     from jarvis.tools.web import _check_url
 
