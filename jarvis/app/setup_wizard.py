@@ -83,11 +83,26 @@ def write_env(api_key: str, user_name: str = "", assistant_name: str = "") -> Pa
     return target
 
 
+# Long enough for a slow connection, short enough that a blocked one gets
+# reported rather than waited on. Without this the SDK waits indefinitely and
+# the wizard sat on "Checking..." forever, with no way out.
+VERIFY_TIMEOUT_S = 25
+
+
 def verify_key(api_key: str) -> tuple[bool, str]:
     """Ask Google whether this key is real.
 
     Listing models authenticates without spending generation quota, so a
     mistyped key costs the user nothing to discover.
+
+    Two things here are load-bearing:
+
+    * **An explicit timeout.** The default is none at all, so on a network
+      that silently drops the connection -- a captive portal, a corporate
+      proxy, a firewall -- this blocked forever.
+    * **Only the first model is read.** `models.list()` returns a pager, and
+      draining it fetches every page. One model is all the proof needed that
+      the key authenticates.
     """
     key = api_key.strip()
     if not key:
@@ -101,14 +116,29 @@ def verify_key(api_key: str) -> tuple[bool, str]:
         from google import genai
 
         os.environ["GEMINI_API_KEY"] = key
-        client = genai.Client(api_key=key)
-        names = [m.name for m in client.models.list()]
+        client = genai.Client(
+            api_key=key,
+            http_options={"timeout": VERIFY_TIMEOUT_S * 1000},  # milliseconds
+        )
+        names = []
+        for model in client.models.list():
+            names.append(model.name)
+            break  # one is enough; do not walk every page
     except Exception as exc:  # noqa: BLE001 - any failure is a failed key
         detail = str(exc)
         if "API_KEY_INVALID" in detail or "API key not valid" in detail:
             return False, "Google rejected that key. Check you copied all of it."
         if "PERMISSION_DENIED" in detail or "403" in detail:
             return False, "That key exists but is not permitted to use the API."
+        if any(
+            word in detail.lower()
+            for word in ("timeout", "timed out", "connect", "ssl", "resolve", "network")
+        ):
+            return False, (
+                "Could not reach Google. This computer may be offline, behind a "
+                "proxy, or on a network that blocks it. Check the connection and "
+                "try again."
+            )
         return (
             False,
             f"Could not reach Google ({type(exc).__name__}). Check your connection.",
@@ -116,7 +146,9 @@ def verify_key(api_key: str) -> tuple[bool, str]:
 
     if not names:
         return False, "The key works but no models are visible to it."
-    return True, f"Verified. {len(names)} models available."
+    # Deliberately no count: only the first page's first model was read, so
+    # any number here would be a number this function did not measure.
+    return True, "Verified."
 
 
 class SetupWizard(ctk.CTkToplevel):
@@ -125,6 +157,7 @@ class SetupWizard(ctk.CTkToplevel):
     def __init__(self, master=None) -> None:
         super().__init__(master)
         self.completed = False
+        self._attempt = 0
 
         self.title("Welcome to JARVIS")
         self.configure(fg_color=BG)
@@ -239,16 +272,40 @@ class SetupWizard(ctk.CTkToplevel):
 
         self.verify_button.configure(state="disabled", text="Checking...")
         self._say("Asking Google whether that key works...", MUTED)
+        self._attempt += 1
 
         # Off the UI thread: a network call here would freeze the window and
         # look like a crash.
         threading.Thread(target=self._verify_worker, args=(key,), daemon=True).start()
+
+        # A belt-and-braces watchdog. The timeout inside verify_key should
+        # always fire first, but a hung socket that ignores it would otherwise
+        # leave this window on "Checking..." indefinitely -- which is exactly
+        # what happened, and a stuck button with no explanation is the worst
+        # possible first impression.
+        self.after(
+            (VERIFY_TIMEOUT_S + 8) * 1000,
+            lambda a=self._attempt: self._verify_stalled(a),
+        )
+
+    def _verify_stalled(self, attempt: int) -> None:
+        if attempt != self._attempt or self.completed:
+            return  # a result already arrived, or a newer attempt superseded this
+        self.verify_button.configure(state="normal", text="Verify and start")
+        self._say(
+            "No answer from Google after "
+            f"{VERIFY_TIMEOUT_S + 8} seconds. This computer may be offline, "
+            "behind a proxy, or on a network that blocks Google. You can try "
+            "again, or quit and set the key up later.",
+            ALARM,
+        )
 
     def _verify_worker(self, key: str) -> None:
         ok, message = verify_key(key)
         self.after(0, lambda: self._verify_done(key, ok, message))
 
     def _verify_done(self, key: str, ok: bool, message: str) -> None:
+        self._attempt += 1  # any pending watchdog for the old attempt goes quiet
         self.verify_button.configure(state="normal", text="Verify and start")
         if not ok:
             self._say(message, ALARM)
