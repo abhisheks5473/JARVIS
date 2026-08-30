@@ -63,7 +63,8 @@ the parts that need them fail quietly rather than loudly:
 
 Add your terminal (or the app, once you make one) to each list. macOS grants
 these per-application, and a denied one shows up as a tool that does nothing
-rather than an error.
+rather than an error. **Step 8** of the launcher walkthrough below says
+exactly where to click, if you have not done this before.
 
 No git? Use the green **Code** button, **Download ZIP**, extract, and `cd` in.
 
@@ -82,13 +83,34 @@ On **Windows**:
 That puts **JARVIS** on your Desktop and in the Start menu. Add `--startup` to
 launch it at login.
 
-On **macOS** there is no `.lnk`, and double-clicking `app.py` opens it in an
-editor rather than running it. The equivalent is a `.command` file: a shell
-script macOS will run when you double-click it.
+On **macOS** there is no `.lnk` file, and double-clicking `app.py` just opens
+it in a text editor. The equivalent is a `.command` file — a small script macOS
+runs when you double-click it. Here is the whole thing, assuming you have never
+opened Terminal before.
 
-**1. Create it.** Run this from inside the JARVIS folder — it writes the
-launcher to your Desktop with the project path baked in, so it works no matter
-where you double-click it from:
+**Step 1 — open Terminal.** Press **Command + Space**, type `Terminal`, press
+**Return**. A window opens with a line of text ending in `%`. That `%` is the
+prompt; it means it is waiting for you.
+
+**Step 2 — go to the JARVIS folder.** Type `cd` followed by a space, then
+**drag the JARVIS folder from Finder into the Terminal window**. It pastes the
+path for you. Press **Return**.
+
+```bash
+cd /Users/you/Desktop/JARVIS
+```
+
+**Step 3 — check you are in the right place.** Type `ls` and press Return:
+
+```bash
+ls
+```
+
+You should see `app.py`, `requirements.txt` and `jarvis` in the list. If you do
+not, you are in the wrong folder — repeat step 2.
+
+**Step 4 — create the launcher.** Copy this whole block, paste it into
+Terminal, press Return:
 
 ```bash
 cat > ~/Desktop/JARVIS.command <<EOF
@@ -98,56 +120,104 @@ exec .venv/bin/python app.py
 EOF
 ```
 
-`cd` first because JARVIS resolves its workspace, data and `.env` relative to
-the project folder, and a double-clicked script starts in your home directory.
-`.venv/bin/python` rather than `python3`, or you get the system Python without
-any of the dependencies. `exec` so the script replaces itself with JARVIS
-instead of hanging around as an extra process.
+Nothing appears to happen. That is correct — on a Mac, a command that worked
+usually says nothing at all. (If you type it line by line instead of pasting,
+the prompt changes to `>` after the first line. That is normal; it is waiting
+for the rest. It returns to `%` after the final `EOF`.)
 
-**2. Make it executable.** Without this, double-clicking opens it in a text
-editor:
+**Step 5 — check the file is right.** Run:
+
+```bash
+cat ~/Desktop/JARVIS.command
+```
+
+You should see exactly three lines, with your own path in the middle one:
+
+```
+#!/bin/bash
+cd "/Users/you/Desktop/JARVIS" || exit 1
+exec .venv/bin/python app.py
+```
+
+If the middle line says `$PWD` instead of a real path, step 2 was skipped —
+start again from there.
+
+**Step 6 — allow it to run.** A new file is not allowed to run as a program
+until you say so:
 
 ```bash
 chmod +x ~/Desktop/JARVIS.command
 ```
 
-**3. Double-click it.** A Terminal window opens behind JARVIS and stays open
-while it runs — that window *is* the process, so closing it quits JARVIS. To
-stop the window lingering after you quit, set **Terminal → Settings → Profiles
-→ Shell → When the shell exits → Close if the shell exited cleanly**.
-
-**4. Grant the permissions to Terminal, not to JARVIS.** This is the step that
-catches people. macOS attaches privacy permissions to the *application that
-launched the process*, and for a `.command` file that is **Terminal**. So in
-**System Settings → Privacy & Security**, it is Terminal you add to
-Microphone, Accessibility and Screen Recording. Granting them to `python` or
-looking for a JARVIS entry will not work, and the failure is silent: the mouse
-tools do nothing, `see_screen` returns a black image, the microphone hears
-nothing.
-
-**If double-clicking does nothing**, the file is either not executable — run
-the `chmod` again — or it was downloaded rather than created locally, in which
-case macOS has quarantined it. Clear that with:
+Again, no output means it worked. To see for yourself:
 
 ```bash
-xattr -d com.apple.quarantine ~/Desktop/JARVIS.command
+ls -l ~/Desktop/JARVIS.command
 ```
 
-**For startup at login**, add the `.command` file under **System Settings →
-General → Login Items**.
+The line starts with `-rwxr-xr-x`. Those three `x`s mean it can now run.
 
-**For a real Dock icon** with no Terminal window, open **Script Editor**, paste
-this with your own path, and save as **File → Export → File Format:
-Application**:
+**Step 7 — double-click it.** Go to your Desktop and double-click
+**JARVIS.command**. A Terminal window opens, and JARVIS starts.
+
+That Terminal window *is* JARVIS running — closing it quits the app. To stop
+it hanging around after you quit, open **Terminal → Settings → Profiles →
+Shell**, and set **When the shell exits** to **Close if the shell exited
+cleanly**.
+
+**Step 8 — grant the three permissions. This is the step everything depends
+on.**
+
+macOS gives permissions to *the app that launched the program*, and you
+launched it from Terminal. So the app you must tick is **Terminal** — not
+Python, and not JARVIS, which is what most people go looking for.
+
+Open **System Settings** (the grey gear in your Dock), click **Privacy &
+Security** in the left sidebar, and do this three times:
+
+| Click this | Then |
+|---|---|
+| **Microphone** | switch **Terminal** on |
+| **Accessibility** | click **+**, choose **Applications → Utilities → Terminal**, switch it on |
+| **Screen Recording** | click **+**, choose **Applications → Utilities → Terminal**, switch it on |
+
+On older macOS this is **System Preferences → Security & Privacy → Privacy**,
+and you click the **padlock** at the bottom left and enter your password first.
+
+**Then quit Terminal completely** (Command + Q) and double-click
+JARVIS.command again. Permissions only take effect for a freshly started app.
+
+If you skip this step nothing warns you. JARVIS opens and talks normally, but
+the mouse tools do nothing, `see_screen` gives back a black picture, and the
+microphone hears silence — all without a single error message.
+
+### If something goes wrong
+
+| What you see | What it means |
+|---|---|
+| Double-clicking opens a text editor | Step 6 was missed — run the `chmod` line again |
+| "cannot be opened because it is from an unidentified developer" | The file was downloaded rather than made by step 4. Run `xattr -d com.apple.quarantine ~/Desktop/JARVIS.command` |
+| `no such file or directory` | The path in the file is wrong. Redo from step 2 |
+| It opens, but the mouse and screen tools do nothing | Step 8 — and remember to quit Terminal fully afterwards |
+| `command not found: brew` | Homebrew is not installed. Get it from **brew.sh**, then redo the Quick start |
+
+### Optional: a real app icon
+
+If you would rather have a proper icon in the Dock and no Terminal window,
+open **Script Editor** (Command + Space, type `Script Editor`), paste this line
+with your own path, and choose **File → Export**, setting **File Format** to
+**Application**:
 
 ```applescript
 do shell script "cd /Users/you/JARVIS && ./.venv/bin/python app.py > /dev/null 2>&1 &"
 ```
 
-That gives you a normal `.app` you can keep in the Dock. Permissions then
-attach to *that* app rather than to Terminal, so grant them to it instead —
-and note that macOS treats it as a new application, so you will be asked
-again the first time each one is needed.
+Save it into your Applications folder. Permissions then belong to *that* app
+instead of Terminal, so repeat step 8 for it — macOS treats it as a completely
+new application and will ask again.
+
+**For startup at login**, add either the `.command` file or the app under
+**System Settings → General → Login Items**.
 
 Prefer the terminal? `run.py` drives the same agent on both.
 
