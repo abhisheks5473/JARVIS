@@ -29,6 +29,7 @@ from . import system  # noqa: F401,E402
 from . import time_tools  # noqa: F401,E402
 from . import vision  # noqa: F401,E402
 from . import web  # noqa: F401,E402
+from . import whatsapp  # noqa: F401,E402
 
 # Gemini's built-in server-side tools.
 #
@@ -106,6 +107,11 @@ PROFILES: dict[str, set[str]] = {
     # The morning briefing job.
     "briefing": {"list_calendar", "read_email", "web_search", "fetch_url",
                  "send_notification"},
+    # Messaging and calls.
+    "whatsapp": {
+        "send_whatsapp", "auto_decline_calls", "declined_calls",
+        "decline_whatsapp_call", "whatsapp_windows", "launch_app", "see_screen",
+    },
     # Recovering something deleted.
     "recovery": {"list_trash", "restore_from_trash", "list_directory", "read_file"},
 }

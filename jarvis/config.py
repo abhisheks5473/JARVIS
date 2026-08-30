@@ -250,6 +250,12 @@ DESTRUCTIVE_TOOLS = {
     "press_keys",
     "move_mouse",
     "scroll_mouse",
+    # Messaging as the user. A sent message cannot be recalled, and with
+    # approval prompts off the taint guard is what stops an injected page
+    # from messaging contacts on your behalf.
+    "send_whatsapp",
+    "auto_decline_calls",
+    "decline_whatsapp_call",
 }
 
 # Tools that ingest content JARVIS did not author. Calling one of these marks

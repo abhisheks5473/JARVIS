@@ -500,6 +500,32 @@ def run_offline(suite: Suite) -> None:
 
         _sh.rmtree(_out, ignore_errors=True)
 
+    # -- WhatsApp automation. Rule matching decides whether a call is
+    # declined and a message sent on the owner's behalf, so it is worth
+    # asserting rather than trusting.
+    from jarvis.triggers.scheduler import CallWatcher as _CW
+
+    _w = _CW()
+    _w.add_rule("raju", "busy")
+    for _title, _want in [("Raju", True), ("raju kumar", True), ("RAJU (2)", True),
+                          ("Amit", False), ("WhatsApp", False), ("", False)]:
+        suite.add(f"call rule: {_title!r}", _w._matches(_title)[0] == _want, _title)
+    _wild = _CW()
+    _wild.add_rule("*", "busy")
+    suite.add("wildcard matches anyone", _wild._matches("Someone")[0], "")
+    _off = _CW()
+    suite.add("no rules means no action", not _off._matches("Raju")[0], "")
+
+    # messaging must stay in the destructive tier, so the taint guard covers
+    # it even with approval prompts switched off
+    _led2 = TaintLedger()
+    _g2 = ApprovalGate(prompter=lambda *_a: False)
+    suite.add("send_whatsapp allowed when clean",
+              _g2.evaluate("send_whatsapp", {}, _led2).outcome.value == "allow", "")
+    _led2.note("fetch_url", attacks[0])
+    suite.add("send_whatsapp blocked when tainted",
+              _g2.evaluate("send_whatsapp", {}, _led2).outcome.value == "denied", "")
+
     # -- SSRF guard
     from jarvis.tools.web import _check_url
 

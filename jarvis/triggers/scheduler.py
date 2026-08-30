@@ -33,6 +33,9 @@ from ..security.approval import ApprovalGate
 from ..security.trash import empty_expired
 
 
+_ACTIVE_CALL_WATCHER = None
+
+
 @dataclass
 class JobResult:
     name: str
@@ -150,6 +153,10 @@ class Nerves:
         self.notify = notify
         self.scheduler = None
         self.watcher = DownloadsWatcher()
+        self.calls = CallWatcher(notify=notify)
+        # Module-level handle so the whatsapp tools can reach the running
+        # watcher. There is exactly one scheduler per process.
+        globals()["_ACTIVE_CALL_WATCHER"] = self.calls
         self.last_error = ""
 
     def start(self, briefing_hour: int = 7, briefing_minute: int = 0) -> bool:
@@ -179,6 +186,15 @@ class Nerves:
             self._check_downloads,
             IntervalTrigger(minutes=5),
             id="downloads_watch",
+            replace_existing=True,
+        )
+        # Two seconds, because a call rings for about thirty and a missed
+        # poll is a missed call. It costs nothing: the check is a window
+        # enumeration, and it returns immediately unless a rule is armed.
+        self.scheduler.add_job(
+            self.calls.poll,
+            IntervalTrigger(seconds=CallWatcher.POLL_SECONDS),
+            id="whatsapp_calls",
             replace_existing=True,
         )
         self.scheduler.add_job(
@@ -239,3 +255,97 @@ class Nerves:
                 self.scheduler.shutdown(wait=False)
             except Exception:  # noqa: BLE001
                 pass
+
+
+class CallWatcher:
+    """Decline WhatsApp calls from named people, and reply for you.
+
+    Deterministic code decides *whether* anything is happening -- it polls for
+    a call window, which is free -- and only a name match triggers action. The
+    model is never asked "is someone calling?", because that would spend quota
+    every two seconds to learn "no".
+
+    Rules are (name, reply) pairs. A name matches when it appears in the call
+    window's title, case-insensitively, so "mum" catches "Mum" and "Mummy".
+    The empty name "*" matches everyone, which is how "decline all calls" is
+    expressed.
+
+    A one-shot guard stops a repeat: WhatsApp rings for many seconds, and
+    without it the same call would be declined and replied to over and over
+    while it was still ringing.
+    """
+
+    POLL_SECONDS = 2
+
+    def __init__(self, notify: Callable[[str], None] | None = None) -> None:
+        self.rules: list[tuple[str, str]] = []
+        self.notify = notify
+        self.enabled = False
+        self._handled: str = ""
+        self._handled_at: float = 0.0
+        self.declined: list[dict] = []
+
+    def add_rule(self, name: str, reply: str = "") -> None:
+        self.rules.append((name.strip().lower(), reply.strip()))
+        self.enabled = True
+
+    def clear_rules(self) -> None:
+        self.rules.clear()
+        self.enabled = False
+
+    def _matches(self, title: str) -> tuple[bool, str]:
+        lowered = title.lower()
+        for name, reply in self.rules:
+            if name in ("*", "all", "everyone") or (name and name in lowered):
+                return True, reply
+        return False, ""
+
+    def poll(self) -> None:
+        if not self.enabled or not self.rules:
+            return
+        try:
+            from ..tools.whatsapp import decline_whatsapp_call, find_call_window, send_whatsapp
+        except Exception:  # noqa: BLE001 - missing libs must not kill the scheduler
+            return
+
+        try:
+            found = find_call_window()
+        except Exception:  # noqa: BLE001
+            return
+        if found is None:
+            self._handled = ""       # the call ended; allow the next one
+            return
+
+        _handle, title = found
+        # One action per ringing call, not one per poll.
+        if title == self._handled and time.time() - self._handled_at < 120:
+            return
+
+        matched, reply = self._matches(title)
+        if not matched:
+            return
+
+        self._handled, self._handled_at = title, time.time()
+        record = {"caller": title, "at": time.time(), "replied": False}
+
+        try:
+            decline_whatsapp_call()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("could not decline call from %s: %s", title, exc)
+
+        if reply:
+            try:
+                time.sleep(1.2)      # let the call window close first
+                send_whatsapp(contact=title, message=reply)
+                record["replied"] = True
+            except Exception as exc:  # noqa: BLE001
+                log.warning("declined %s but could not reply: %s", title, exc)
+
+        self.declined.append(record)
+        del self.declined[:-50]
+        transcript.log_event("call_declined", caller=title, replied=record["replied"])
+        if self.notify:
+            self.notify(
+                f"Declined a WhatsApp call from {title}"
+                + (" and replied." if record["replied"] else ".")
+            )
