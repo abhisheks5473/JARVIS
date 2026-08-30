@@ -82,17 +82,72 @@ On **Windows**:
 That puts **JARVIS** on your Desktop and in the Start menu. Add `--startup` to
 launch it at login.
 
-On **macOS**, write a two-line launcher and make it executable:
+On **macOS** there is no `.lnk`, and double-clicking `app.py` opens it in an
+editor rather than running it. The equivalent is a `.command` file: a shell
+script macOS will run when you double-click it.
+
+**1. Create it.** Run this from inside the JARVIS folder — it writes the
+launcher to your Desktop with the project path baked in, so it works no matter
+where you double-click it from:
 
 ```bash
-printf '#!/bin/bash
-cd "%s"
+cat > ~/Desktop/JARVIS.command <<EOF
+#!/bin/bash
+cd "$PWD" || exit 1
 exec .venv/bin/python app.py
-' "$PWD" > ~/Desktop/JARVIS.command && chmod +x ~/Desktop/JARVIS.command
+EOF
 ```
 
-Double-clicking that opens JARVIS. For login startup, add it under **System
-Settings → General → Login Items**.
+`cd` first because JARVIS resolves its workspace, data and `.env` relative to
+the project folder, and a double-clicked script starts in your home directory.
+`.venv/bin/python` rather than `python3`, or you get the system Python without
+any of the dependencies. `exec` so the script replaces itself with JARVIS
+instead of hanging around as an extra process.
+
+**2. Make it executable.** Without this, double-clicking opens it in a text
+editor:
+
+```bash
+chmod +x ~/Desktop/JARVIS.command
+```
+
+**3. Double-click it.** A Terminal window opens behind JARVIS and stays open
+while it runs — that window *is* the process, so closing it quits JARVIS. To
+stop the window lingering after you quit, set **Terminal → Settings → Profiles
+→ Shell → When the shell exits → Close if the shell exited cleanly**.
+
+**4. Grant the permissions to Terminal, not to JARVIS.** This is the step that
+catches people. macOS attaches privacy permissions to the *application that
+launched the process*, and for a `.command` file that is **Terminal**. So in
+**System Settings → Privacy & Security**, it is Terminal you add to
+Microphone, Accessibility and Screen Recording. Granting them to `python` or
+looking for a JARVIS entry will not work, and the failure is silent: the mouse
+tools do nothing, `see_screen` returns a black image, the microphone hears
+nothing.
+
+**If double-clicking does nothing**, the file is either not executable — run
+the `chmod` again — or it was downloaded rather than created locally, in which
+case macOS has quarantined it. Clear that with:
+
+```bash
+xattr -d com.apple.quarantine ~/Desktop/JARVIS.command
+```
+
+**For startup at login**, add the `.command` file under **System Settings →
+General → Login Items**.
+
+**For a real Dock icon** with no Terminal window, open **Script Editor**, paste
+this with your own path, and save as **File → Export → File Format:
+Application**:
+
+```applescript
+do shell script "cd /Users/you/JARVIS && ./.venv/bin/python app.py > /dev/null 2>&1 &"
+```
+
+That gives you a normal `.app` you can keep in the Dock. Permissions then
+attach to *that* app rather than to Terminal, so grant them to it instead —
+and note that macOS treats it as a new application, so you will be asked
+again the first time each one is needed.
 
 Prefer the terminal? `run.py` drives the same agent on both.
 
