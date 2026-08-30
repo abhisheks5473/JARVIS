@@ -258,7 +258,7 @@ def _rect(handle) -> tuple[int, int, int, int]:
     return win32gui.GetWindowRect(handle)
 
 
-def _focus_compose_form() -> None:
+def _focus_compose_body() -> None:
     """Put the cursor in the To field of an open compose window.
 
     Chrome keeps keyboard focus in the address bar after a navigation, so
@@ -267,8 +267,7 @@ def _focus_compose_form() -> None:
     while the tool cheerfully reported a draft.
 
     Clicking once inside the large empty message body moves focus into the
-    page. Shift+Tab from there walks back Subject, then To: a fixed order that
-    does not depend on exactly where the click landed.
+    page, and gives the backwards fill a known place to start from.
     """
     pyautogui = _pyautogui()
     handle = _browser_window()
@@ -277,10 +276,6 @@ def _focus_compose_form() -> None:
     left, top, right, bottom = _rect(handle)
     pyautogui.click(left + (right - left) // 2, top + int((bottom - top) * 0.55))
     time.sleep(0.5)
-    pyautogui.hotkey("shift", "tab")
-    time.sleep(0.2)
-    pyautogui.hotkey("shift", "tab")
-    time.sleep(0.3)
 
 
 # ---------------------------------------------------------------------- tools
@@ -403,22 +398,39 @@ def write_email(to: str, subject: str, body: str, send: bool = False) -> dict:
     pyautogui = _pyautogui()
     _navigate(COMPOSE_URL)
     time.sleep(1.2)
-    _focus_compose_form()
+    # Filled backwards -- body, then subject, then recipient -- and that order
+    # is the whole trick.
+    #
+    # Typing an address into To opens Gmail's contact autocomplete, and Tab
+    # with that list open picks the highlighted suggestion instead of moving
+    # on. Focus stays in To, so every later field lands one place too early:
+    # the subject arrives as a second recipient, the body becomes the subject,
+    # and the message goes out empty. That is exactly what happened the first
+    # time somebody used it.
+    #
+    # Going backwards means never tabbing away from To, so the autocomplete
+    # has nothing to swallow.
+    _focus_compose_body()
 
-    pyautogui.write(to.strip(), interval=0.01)
-    pyautogui.press("tab")
-    time.sleep(0.25)
-    pyautogui.write(subject.strip(), interval=0.01)
-    pyautogui.press("tab")
-    time.sleep(0.25)
-
-    # Typed line by line: a newline inside pyautogui.write is a Return, which
-    # is fine in the body but would submit if focus were anywhere else.
     for index, line in enumerate(body.split("\n")):
         if index:
             pyautogui.press("enter")
         if line:
             pyautogui.write(line, interval=0.006)
+
+    pyautogui.hotkey("shift", "tab")          # body -> subject
+    time.sleep(0.3)
+    pyautogui.write(subject.strip(), interval=0.01)
+
+    pyautogui.hotkey("shift", "tab")          # subject -> to
+    time.sleep(0.3)
+    pyautogui.write(to.strip(), interval=0.01)
+    time.sleep(0.8)                           # let the suggestion list appear
+    # A comma commits exactly what was typed. Tab or Enter here would accept
+    # whichever contact Gmail happened to highlight, which is not necessarily
+    # the address that was asked for.
+    pyautogui.write(",", interval=0.01)
+    time.sleep(0.4)
 
     if not send:
         time.sleep(0.6)
@@ -434,9 +446,14 @@ def write_email(to: str, subject: str, body: str, send: bool = False) -> dict:
             ),
         }
 
+    # Click back into the body before sending. That blurs To, which commits
+    # the typed address into a chip and closes the contact autocomplete --
+    # and Ctrl+Enter with that list still open would send to whichever
+    # contact Gmail had highlighted rather than the one asked for.
+    _focus_compose_body()
     time.sleep(0.4)
     pyautogui.hotkey("ctrl", "enter")  # Gmail's send
-    time.sleep(1.5)
+    time.sleep(2.0)
 
     return {
         "drafted": True,
