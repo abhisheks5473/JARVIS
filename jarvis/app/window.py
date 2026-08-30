@@ -261,6 +261,11 @@ class JarvisWindow(ctk.CTk):
         self._start_scheduler()
         self._start_wakeword()
 
+        if self._tray is None:
+            # Without a tray there is nowhere to hide to, and closing the
+            # window quits. Worth saying once, rather than being discovered.
+            self._write("No tray icon here, so closing this window quits.", "muted")
+
     def _start_hotkeys(self) -> None:
         try:
             from ..voice.hotkey import default_hotkeys

@@ -12,6 +12,7 @@ kind of bug to ship.
 """
 from __future__ import annotations
 
+import sys
 import threading
 
 from .. import config
@@ -49,6 +50,25 @@ class Tray:
         self.last_error = ""
 
     def start(self) -> bool:
+        # pystray's macOS backend drives AppKit, and AppKit aborts the entire
+        # process when it is touched from anywhere but the main thread. Not an
+        # exception that the try/except below could catch -- a SIGTRAP that
+        # takes the interpreter with it, which is why the report from a Mac
+        # was "zsh: trace trap" and "Python quit unexpectedly", with no
+        # traceback and no window, before mainloop() was ever reached.
+        #
+        # Tk already owns the main thread here, so there is no main thread
+        # left to hand to pystray, and run_detached() still expects an
+        # NSApplication run loop that Tk is not providing. There is no tray on
+        # macOS; the window closing quits instead, which hide_to_tray already
+        # does when no tray is attached.
+        if sys.platform == "darwin":
+            self.last_error = (
+                "no menu-bar icon on macOS: pystray needs the main thread, "
+                "which the window already has"
+            )
+            return False
+
         try:
             import pystray
         except ImportError as exc:

@@ -200,6 +200,7 @@ microphone hears silence — all without a single error message.
 | `no such file or directory` | The path in the file is wrong. Redo from step 2 |
 | It opens, but the mouse and screen tools do nothing | Step 8 — and remember to quit Terminal fully afterwards |
 | `command not found: brew` | Homebrew is not installed. Get it from **brew.sh**, then redo the Quick start |
+| `zsh: trace trap` and "Python quit unexpectedly", with no window | A native crash rather than a Python error, so there is no traceback to read. This was the menu-bar icon calling AppKit off the main thread; fixed — update to the current version |
 
 ### Optional: a real app icon
 
@@ -280,6 +281,7 @@ there rather than silently misbehaving.
 | Media keys and volume | yes | no |
 | WhatsApp messages and calls | yes | no |
 | Gmail and Drive in the browser | yes | no |
+| Menu-bar / tray icon | yes | no — closing the window quits |
 | Shareable .exe | yes | no — run from source |
 
 41 of the 62 tools are platform-independent. The 21 that are not sit in
@@ -308,9 +310,16 @@ The kill switch is a key combination rather than a voice command on purpose: a
 voice-activated stop fails exactly when you need it, which is when it is
 talking over you.
 
-Closing the window hides it to the system tray. The assistant keeps running,
-scheduled jobs keep firing, and push-to-talk still works from any application.
-Quit properly from the tray menu or with `ctrl+alt+q`.
+On Windows, closing the window hides it to the system tray: the assistant keeps
+running, scheduled jobs keep firing, and push-to-talk still works from any
+application. Quit properly from the tray menu or with `ctrl+alt+q`.
+
+There is **no tray icon on macOS**, so closing the window quits, and the app
+says so on startup. pystray's macOS backend drives AppKit, which must own the
+main thread — and the window already has it. Running it on a second thread
+does not raise an exception there, it aborts the process outright.
+
+
 
 ### Wake word
 
