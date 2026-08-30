@@ -19,6 +19,7 @@ Three rules hold the design together:
 """
 from __future__ import annotations
 
+import threading
 import tkinter as tk
 from tkinter import font as tkfont
 
@@ -258,6 +259,7 @@ class JarvisWindow(ctk.CTk):
 
         self._start_hotkeys()
         self._start_scheduler()
+        self._start_wakeword()
 
     def _start_hotkeys(self) -> None:
         try:
@@ -296,6 +298,83 @@ class JarvisWindow(ctk.CTk):
             self._write(f"Scheduler unavailable: {type(exc).__name__}", "warn")
 
     # ------------------------------------------------------------ input
+    def _start_wakeword(self) -> None:
+        """Listen for the phrase the user recorded, if there is one."""
+        if not config.VOICE.wake_enabled:
+            return
+        try:
+            from ..voice.wakeword import wake
+        except Exception as exc:  # noqa: BLE001
+            self._write(f"Wake word unavailable: {type(exc).__name__}", "warn")
+            return
+
+        self.wake = wake
+        if not wake.load():
+            self._write(
+                "No wake word recorded. Say one five times with /wake <phrase>.",
+                "muted",
+            )
+            return
+
+        # busy covers both thinking and speaking, which is what stops JARVIS
+        # waking itself up on the sound of its own voice.
+        if wake.start(
+            on_wake=lambda: self.after(0, self._on_wake),
+            is_busy=lambda: self.bridge.busy,
+        ):
+            label = wake.phrase or "your wake word"
+            self._write(f'Listening for "{label}".', "muted")
+        else:
+            self._write(f"Wake word not listening: {wake.last_error}", "warn")
+
+    def _on_wake(self) -> None:
+        """The phrase was heard. Come to the front and start listening."""
+        if self.bridge.busy:
+            return
+        self.show_window()
+        self._write(f'"{self.wake.phrase or "wake word"}" - listening.', "muted")
+        self.bridge.listen()
+
+    def _enroll_wakeword(self, phrase: str) -> None:
+        """Record the phrase five times and learn it.
+
+        Runs on a worker thread because each recording blocks on the
+        microphone, and Tk must keep painting the prompts while it does.
+        """
+        from ..voice.wakeword import REQUIRED_SAMPLES, wake
+
+        wake.stop()
+
+        def say(text: str, tag: str = "muted") -> None:
+            self.after(0, lambda: self._write(text, tag))
+
+        def worker() -> None:
+            say(f'Recording "{phrase}". Say it {REQUIRED_SAMPLES} times, '
+                "normally, with a pause between each.", "jarvis")
+            clips = []
+            for number in range(1, REQUIRED_SAMPLES + 1):
+                say(f"  {number} of {REQUIRED_SAMPLES} - speak now")
+                clip = wake.record_sample()
+                if clip is None:
+                    say(f"  heard nothing ({wake.last_error or 'silence'})", "warn")
+                    continue
+                clips.append(clip)
+                say(f"  got {len(clip) / config.VOICE.sample_rate:.2f}s")
+
+            result = wake.enroll_from_audio(clips, phrase=phrase)
+            for problem in result.get("problems", []):
+                say(f"  {problem}", "warn")
+            if not result.get("ok"):
+                say(result.get("message", "could not learn it"), "bad")
+                return
+
+            say(result["message"], "jarvis")
+            if not result.get("consistent", True):
+                say("  the recordings varied a lot; redo /wake if it misfires", "warn")
+            self.after(0, self._start_wakeword)
+
+        threading.Thread(target=worker, daemon=True, name="wake-enroll").start()
+
     def _submit(self) -> None:
         text = self.entry.get().strip()
         if not text:
@@ -338,11 +417,22 @@ class JarvisWindow(ctk.CTk):
 
             for fact in memory.all_facts(20):
                 self._write(f"  [{fact.id}] {fact.fact}", "tool")
+        elif name == "wake":
+            parts = raw[1:].split(None, 1)
+            argument = parts[1].strip() if len(parts) > 1 else ""
+            if argument.lower() in ("off", "stop", "forget"):
+                from ..voice.wakeword import wake
+
+                wake.stop()
+                wake.forget()
+                self._write("Wake word forgotten; no longer listening.", "muted")
+            else:
+                self._enroll_wakeword(argument or "wake word")
         elif name == "voice":
             self.bridge.speak_replies = not self.bridge.speak_replies
             self._write(f"Speaking replies: {self.bridge.speak_replies}", "muted")
         else:
-            self._write("Commands: /clear /quota /memory /voice /quit", "muted")
+            self._write("Commands: /clear /quota /memory /voice /wake /quit", "muted")
 
     def _set_busy(self, busy: bool) -> None:
         self.send_button.configure(state="disabled" if busy else "normal")
@@ -474,6 +564,8 @@ class JarvisWindow(ctk.CTk):
                 self.nerves.stop()
             if self._tray is not None:
                 self._tray.stop()
+            if getattr(self, 'wake', None) is not None:
+                self.wake.stop()
             self.bridge.shutdown()
         finally:
             self.destroy()

@@ -358,6 +358,27 @@ The kill switch is a key combination rather than a voice command on purpose: a
 voice-activated stop fails exactly when you need it, which is when it is
 talking over you.
 
+### Wake word
+
+`/wake jarvis` records the phrase five times and learns it from **your** voice
+-- your accent, your microphone, your way of saying it. After that the app
+listens continuously and starts a turn when it hears it, exactly as if you had
+pressed Talk.
+
+It is deliberately speaker-dependent: the templates come from your recordings,
+so it answers to you rather than to the television. The threshold is measured
+from how much you vary between your own five repetitions, not from a constant
+chosen on somebody else's laptop.
+
+Nothing leaves the machine. The audio is turned into MFCC features, matched
+with dynamic time warping in a few milliseconds of numpy, and the recordings
+themselves are discarded -- only the features are saved, in
+`data/voice/wakeword.npz`. There is no model download and no network call.
+
+If it misfires, `JARVIS_WAKE_SENSITIVITY` in `.env` runs from 0 (strict, fewer
+false wakes) to 1 (eager). Re-recording with `/wake` usually helps more:
+say the phrase the way you actually say it, not the way you think you should.
+
 Slash commands in the REPL:
 
 ```
@@ -370,6 +391,8 @@ Slash commands in the REPL:
 /clear       forget the taint flag (only you can do this, never the model)
 /trash       what is recoverable, and for how long
 /queue       actions a background job wanted but could not take
+/wake PHRASE record a wake word in your own voice (five samples)
+/wake off    forget it and stop listening
 ```
 
 Worth trying:

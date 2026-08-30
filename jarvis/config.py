@@ -354,6 +354,11 @@ class VoiceConfig:
     # cheerfully replies to itself.
     mute_during_playback: bool = True
     barge_in: bool = os.getenv("JARVIS_BARGE_IN", "1") == "1"
+    # Wake word. Off until one is recorded -- there is nothing to listen for
+    # before that, and a microphone open for no reason is worth avoiding.
+    wake_enabled: bool = os.getenv("JARVIS_WAKEWORD", "1") == "1"
+    # 0 is strict (fewer false wakes, more missed ones), 1 is eager.
+    wake_sensitivity: float = float(os.getenv("JARVIS_WAKE_SENSITIVITY", "0.5"))
 
 
 VOICE = VoiceConfig()
