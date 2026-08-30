@@ -13,12 +13,18 @@ are an agent loop wrapped around a text-to-speech library. The difference here
 is everything that happens between *"the model asked for a tool"* and *"the
 tool ran"*.
 
+Built and tested on **Windows**. It runs on **macOS** too, minus the three
+groups of tools that reach into Windows APIs — see [what runs
+where](#what-runs-where).
+
 ---
 
 ## Quick start
 
 You need a Google account and about ten minutes, most of it waiting for
 downloads. No credit card.
+
+**Windows**
 
 ```bash
 git clone https://github.com/abhisheks5473/JARVIS.git
@@ -29,8 +35,37 @@ python -m venv .venv
 ```
 
 Python 3.11 or newer, from **python.org/downloads** — tick **"Add python.exe to
-PATH"** on the first installer screen or none of the above will be found. No
-git? Use the green **Code** button, **Download ZIP**, extract, and `cd` in.
+PATH"** on the first installer screen or none of the above will be found.
+
+**macOS**
+
+```bash
+brew install python-tk portaudio
+git clone https://github.com/abhisheks5473/JARVIS.git
+cd JARVIS
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python app.py
+```
+
+`python-tk` because the window is Tk and Homebrew's Python ships without it;
+`portaudio` because that is what the microphone goes through. Everything
+Windows-only is skipped automatically at install time, so nothing to edit.
+
+Then grant three permissions in **System Settings → Privacy & Security**, or
+the parts that need them fail quietly rather than loudly:
+
+| permission | needed for |
+|---|---|
+| **Microphone** | speech input and the wake word |
+| **Accessibility** | the mouse, the keyboard and the global hotkeys |
+| **Screen Recording** | `see_screen`, so it can look before it clicks |
+
+Add your terminal (or the app, once you make one) to each list. macOS grants
+these per-application, and a denied one shows up as a tool that does nothing
+rather than an error.
+
+No git? Use the green **Code** button, **Download ZIP**, extract, and `cd` in.
 
 **The first launch asks for your API key and shows you where to get one.** It
 opens Google AI Studio for you and writes `.env` itself. You never create it by
@@ -38,17 +73,34 @@ hand.
 
 Then make it double-clickable, so you never touch a terminal again:
 
+On **Windows**:
+
 ```bash
 .venv\Scripts\python.exe make_shortcut.py
 ```
 
 That puts **JARVIS** on your Desktop and in the Start menu. Add `--startup` to
-launch it at login. Prefer the terminal? `run.py` drives the same agent.
+launch it at login.
+
+On **macOS**, write a two-line launcher and make it executable:
+
+```bash
+printf '#!/bin/bash
+cd "%s"
+exec .venv/bin/python app.py
+' "$PWD" > ~/Desktop/JARVIS.command && chmod +x ~/Desktop/JARVIS.command
+```
+
+Double-clicking that opens JARVIS. For login startup, add it under **System
+Settings → General → Login Items**.
+
+Prefer the terminal? `run.py` drives the same agent on both.
 
 ### When something looks wrong
 
 ```bash
-.venv\Scripts\python.exe -m jarvis.doctor
+.venv\Scripts\python.exe -m jarvis.doctor    # Windows
+.venv/bin/python -m jarvis.doctor            # macOS
 ```
 
 Checks paths, packages, security controls and quota, then asks your key which
@@ -69,22 +121,53 @@ honest as those numbers.
 
 | | |
 |---|---|
-| **Desktop** | Open and close apps, windows, volume, media keys, clipboard, processes, battery |
+| **Desktop** | Open and close apps, windows, clipboard, processes, battery. *Media keys and volume are Windows-only* |
 | **Mouse and keyboard** | Move, click, drag, scroll, type, key combinations — enough to operate any application |
 | **Screen** | Looks at what is actually there before clicking it |
 | **Files** | Read, write, search, rename, delete — confined to a fixed set of folders |
 | **Documents** | PDF, Word, Excel, PowerPoint, CSV, HTML, Markdown, text — and reads them back |
 | **Media** | MP3, MP4, MKV, GIF, format conversion, image editing, media inspection |
 | **Generation** | Images and video from a description — *needs billing enabled; not on the free tier* |
-| **WhatsApp** | Send messages, place voice and video calls, auto-decline calls from named people with a reply |
+| **WhatsApp** | Send messages, place voice and video calls, auto-decline calls from named people with a reply. **Windows only** |
 | **Web** | Search and fetch, on scraped backends that cost no quota |
-| **Google** | Gmail, Drive, Calendar, Docs, Photos and the rest, driven in the browser you are signed into — including writing and sending mail |
+| **Google** | Gmail, Drive, Calendar, Docs, Photos and the rest, driven in the browser you are signed into — including writing and sending mail. **Windows only** |
 | **Calendar and email (API)** | Read-only, at the OAuth scope level |
 | **Memory** | SQLite with full-text search; tell it something once |
 | **Background** | Morning briefing, downloads watch, call watcher, dated trash purge |
 | **Voice** | Local speech in and out, push-to-talk, and a wake word in your own voice |
 
 62 tools in total. It is never offered all of them at once — see below.
+
+### What runs where
+
+Windows is where this was built and tested. macOS runs the agent and most of
+the toolkit; three groups of tools reach into Windows APIs and are skipped
+there rather than silently misbehaving.
+
+| | Windows | macOS |
+|---|---|---|
+| Agent, router, quota, memory, security | yes | yes |
+| Files, documents, media, image generation | yes | yes |
+| Web search and fetch | yes | yes |
+| Mouse, keyboard, screen | yes | yes, with Accessibility and Screen Recording granted |
+| Voice in and out, wake word | yes | yes, with Microphone granted |
+| Desktop apps, windows, clipboard | yes | yes |
+| Media keys and volume | yes | no |
+| WhatsApp messages and calls | yes | no |
+| Gmail and Drive in the browser | yes | no |
+| Shareable .exe | yes | no — run from source |
+
+41 of the 62 tools are platform-independent. The 21 that are not sit in
+`desktop.py`, `whatsapp.py` and `google_apps.py`, and they depend on the
+Windows APIs for enumerating another application's windows and reading its
+controls: `win32gui` for the window list, UI Automation for what is inside a
+WebView. The macOS equivalents exist — Quartz and the Accessibility API — but
+they are a port, not a flag, and none of it has been run on a Mac. Nothing
+crashes: the tools are simply not offered, and asking for one says so.
+
+The macOS instructions above come from what the code actually requires, read
+off its imports and permissions, rather than from a Mac that ran it. If
+something there is wrong, it is worth reporting rather than working around.
 
 ---
 
@@ -130,6 +213,9 @@ Re-recording usually helps more: say the phrase the way you actually say it,
 not the way you think you should. `/wake off` forgets it.
 
 ### Google services
+
+**Windows only.** It drives the browser through the Windows window and
+clipboard APIs; the macOS equivalents are a port rather than a flag.
 
 ```
 "open my drive and find the invoice"
@@ -330,6 +416,10 @@ on every change.
 ---
 
 ## Sharing it with someone else
+
+Windows only — PyInstaller builds for the platform it runs on, and the tray,
+shortcut and installer paths here are all Windows. macOS users run from
+source with the Quick start above.
 
 ```bash
 pip install pyinstaller
