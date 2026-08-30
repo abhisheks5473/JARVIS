@@ -142,6 +142,13 @@ def generate_image(
         raise ToolError("no prompt given", hint="describe the picture you want")
 
     fmt = format.lower().lstrip(".")
+    # ".img" is a disk image, not a picture -- but nobody asking JARVIS for
+    # "a river .img" means a disk image. Refusing on a technicality would be
+    # correct and useless, so it is read as the obvious intent and the answer
+    # says which format was actually written.
+    aliased_from = ""
+    if fmt in ("img", "image", "jpeg"):
+        aliased_from, fmt = fmt, "jpg" if fmt == "jpeg" else "png"
     if fmt not in IMAGE_FORMATS:
         raise ToolError(
             f"unknown image format: {format}",
@@ -197,6 +204,11 @@ def generate_image(
                   else "try describing the image differently"),
         )
 
+    # A path written as "river.img" must not become "river.img.png".
+    for stray in (".img", ".image"):
+        if path.lower().endswith(stray):
+            path = path[: -len(stray)]
+
     target = _target(path, fmt)
     # The model returns PNG. Anything else is a conversion, and Pillow is
     # already a dependency for the rest of the media tools.
@@ -220,6 +232,8 @@ def generate_image(
         "seconds": round(time.time() - started, 1),
         "model": model,
         "edited_from": edited,
+        "note_format": (f"asked for .{aliased_from}, which is not a picture "
+                        f"format -- wrote .{fmt}") if aliased_from else None,
         "note": " ".join(said)[:200] or None,
     }
 
