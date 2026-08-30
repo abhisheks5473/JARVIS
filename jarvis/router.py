@@ -115,6 +115,14 @@ def choose_tier(text: str, history_turns: int = 0) -> ModelTier:
 _PROFILE_SIGNALS: list[tuple[str, re.Pattern[str]]] = [
     ("recovery", re.compile(
         r"\b(trash|restore|recover|deleted it|undelete|recycle bin)\b", re.I)),
+    # Google in the browser. Before briefing, which would otherwise claim
+    # "inbox" for the read-only OAuth tools that cannot send anything.
+    ("google", re.compile(
+        r"\b(gmail|google\s+(drive|docs|sheets|slides|photos|keep|tasks|contacts)|my\s+drive)\b|"
+        r"\b(send|write|draft|compose|reply\s+to)\b[^\n]{0,24}\be-?mails?\b|"
+        r"\be-?mails?\b[^\n]{0,24}\b(from|to|about|inbox|saying)\b|"
+        r"\b(check|read|open|search)\b[^\n]{0,16}\b(inbox|e-?mails?|drive)\b",
+        re.I)),
     ("briefing", re.compile(
         r"\b(calendar|schedule|appointment|inbox|unread|briefing|agenda)\b", re.I)),
     # Messaging and calls. Before "control", which would otherwise claim the

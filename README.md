@@ -77,12 +77,13 @@ honest as those numbers.
 | **Media** | MP3, MP4, GIF, format conversion, image editing, media inspection |
 | **WhatsApp** | Send messages, place voice and video calls, auto-decline calls from named people with a reply |
 | **Web** | Search and fetch, on scraped backends that cost no quota |
-| **Calendar and email** | Read-only, at the OAuth scope level |
+| **Google** | Gmail, Drive, Calendar, Docs, Photos and the rest, driven in the browser you are signed into — including writing and sending mail |
+| **Calendar and email (API)** | Read-only, at the OAuth scope level |
 | **Memory** | SQLite with full-text search; tell it something once |
 | **Background** | Morning briefing, downloads watch, call watcher, dated trash purge |
 | **Voice** | Local speech in and out, push-to-talk, and a wake word in your own voice |
 
-56 tools in total. It is never offered all of them at once — see below.
+60 tools in total. It is never offered all of them at once — see below.
 
 ---
 
@@ -126,6 +127,30 @@ are kept, in `data/voice/wakeword.npz`.
 If it misfires, `JARVIS_WAKE_SENSITIVITY` runs from 0 (strict) to 1 (eager).
 Re-recording usually helps more: say the phrase the way you actually say it,
 not the way you think you should. `/wake off` forgets it.
+
+### Google services
+
+```
+"open my drive and find the invoice"
+"draft an email to sam@example.com about Friday"
+"read this page"
+```
+
+`open_google` navigates the browser you are already signed into, so whichever
+account is logged in is the one you get, and it stops working the moment you
+sign out. No consent screen, no verified app, no long-lived token — and every
+Google product, not just the three with client libraries.
+
+`read_page` copies the page text with the keyboard, because Chrome does not
+expose page content to UI Automation unless it detects assistive technology; a
+tree walk over an ordinary page returns zero nodes. The clipboard is put back
+afterwards. Gmail and Drive draw their content in a way that copying cannot
+reach, so `read_page` detects that and says so rather than reporting an empty
+inbox — use `see_screen` for those, which is what the eyes are for.
+
+`write_email` fills the compose form and leaves a draft. It sends only when
+asked, and it is in the destructive tier so a tainted conversation cannot send
+at all.
 
 ### Slash commands
 
@@ -275,7 +300,7 @@ the door.
 
 **An eval suite from day one.**
 
-149 offline cases covering safety and routing — hard-deny, injection detection,
+153 offline cases covering safety and routing — hard-deny, injection detection,
 false-positive resistance, taint escalation, sandbox escapes, SSRF, secret
 redaction, model routing. They are deterministic, so they cost nothing and run
 on every change.
@@ -372,13 +397,13 @@ jarvis/
 │   ├── taint.py       injection detection and the taint ledger
 │   ├── approval.py    four-layer gate, secret redaction
 │   └── trash.py       deletion you can take back
-├── tools/             56 tools, schemas generated from type hints
+├── tools/             60 tools, schemas generated from type hints
 ├── memory/            SQLite + FTS5
 ├── voice/             faster-whisper in, Piper out, wake word, push-to-talk
 ├── triggers/          scheduled and event-driven autonomy
 ├── app/               the desktop window, tray and setup wizard
 └── hud/               the terminal display
-evals/                 149 offline cases + a live replay harness
+evals/                 153 offline cases + a live replay harness
 ```
 
 Every model ID lives in `config.py`. When Google deprecates one — and they
@@ -392,9 +417,13 @@ Decided once, in advance, rather than in the moment:
 
 - **No money.** No payments, transfers, trades or purchases. Not because the
   model is stupid, but because the failure mode is unrecoverable.
-- **No sending as you.** Mail and calendar are read-only at the OAuth scope
-  level. Even a fully compromised agent cannot mail as you, because the token it
-  holds is not permitted to. It drafts; you send.
+- **The OAuth token still cannot send.** Mail and calendar remain read-only at
+  the scope level, so nothing that goes through the API can mail as you.
+  **The browser path can**, by design and by request: `write_email` types into
+  the Gmail you are already signed into. It drafts by default and sends only
+  when asked, and it sits in the destructive tier, so the taint guard refuses
+  it once a page carrying an injection has been read. That is the control that
+  matters here, because the scope restriction no longer covers this route.
 - **No credentials.** It never handles passwords, 2FA codes or key material.
   Anything resembling a secret is redacted before it reaches the model or the
   logs, and the API key is stripped from every subprocess environment.

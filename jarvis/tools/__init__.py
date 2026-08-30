@@ -29,6 +29,7 @@ from . import system  # noqa: F401,E402
 from . import time_tools  # noqa: F401,E402
 from . import vision  # noqa: F401,E402
 from . import web  # noqa: F401,E402
+from . import google_apps  # noqa: F401,E402
 from . import whatsapp  # noqa: F401,E402
 
 # Gemini's built-in server-side tools.
@@ -108,6 +109,13 @@ PROFILES: dict[str, set[str]] = {
     "briefing": {"list_calendar", "read_email", "web_search", "fetch_url",
                  "send_notification"},
     # Messaging and calls.
+    # Google through the browser. The mouse and vision tools ride along
+    # because a web page always needs something clicked that no URL reaches.
+    "google": {
+        "open_google", "read_page", "write_email", "browser_page",
+        "see_screen", "click_mouse", "type_text", "press_keys",
+        "scroll_mouse", "launch_app",
+    },
     "whatsapp": {
         "send_whatsapp", "call_whatsapp", "auto_decline_calls", "declined_calls",
         "decline_whatsapp_call", "whatsapp_windows", "whatsapp_call_probe",

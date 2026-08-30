@@ -254,6 +254,10 @@ DESTRUCTIVE_TOOLS = {
     # approval prompts off the taint guard is what stops an injected page
     # from messaging contacts on your behalf.
     "send_whatsapp",
+    # Sending mail is outbound and cannot be recalled. Drafting is not here on
+    # purpose: a draft the user reads before sending is not an escalation, and
+    # blocking it would make the feature useless exactly when it is safe.
+    "write_email",
     "auto_decline_calls",
     "decline_whatsapp_call",
 }
@@ -269,6 +273,8 @@ UNTRUSTED_SOURCE_TOOLS = {
     "see_screen",
     "read_clipboard",
     "search_files",
+    # A web page, an email, a shared document -- none of it authored here.
+    "read_page",
 }
 
 # always | smart | never
