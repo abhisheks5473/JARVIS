@@ -74,7 +74,8 @@ honest as those numbers.
 | **Screen** | Looks at what is actually there before clicking it |
 | **Files** | Read, write, search, rename, delete — confined to a fixed set of folders |
 | **Documents** | PDF, Word, Excel, PowerPoint, CSV, HTML, Markdown, text — and reads them back |
-| **Media** | MP3, MP4, GIF, format conversion, image editing, media inspection |
+| **Media** | MP3, MP4, MKV, GIF, format conversion, image editing, media inspection |
+| **Generation** | Images and video from a description — *needs billing enabled; not on the free tier* |
 | **WhatsApp** | Send messages, place voice and video calls, auto-decline calls from named people with a reply |
 | **Web** | Search and fetch, on scraped backends that cost no quota |
 | **Google** | Gmail, Drive, Calendar, Docs, Photos and the rest, driven in the browser you are signed into — including writing and sending mail |
@@ -83,7 +84,7 @@ honest as those numbers.
 | **Background** | Morning briefing, downloads watch, call watcher, dated trash purge |
 | **Voice** | Local speech in and out, push-to-talk, and a wake word in your own voice |
 
-60 tools in total. It is never offered all of them at once — see below.
+62 tools in total. It is never offered all of them at once — see below.
 
 ---
 
@@ -298,6 +299,27 @@ Anti-bot challenge pages are detected explicitly, because reporting one as "no
 results" would have the agent claim it found nothing when it was turned away at
 the door.
 
+**Image and video generation are not free either, and that was measured.**
+
+`generate_image` and `generate_video` are wired to Gemini's image models and
+to Veo. Both are listed by the API, and both return 429 on a free-tier key.
+The check that makes that meaningful is the same bisection used for
+`google_search`: a text request on the same key, in the same second, before
+and after, succeeds. So the 429 is the tier, not a rate limit and not a busy
+moment — which matters, because the two look identical and one of them is
+worth retrying forever.
+
+They are wired up anyway, because the block is Google's billing rather than
+anything here: enable billing on the key's project and they work unchanged.
+The failure says exactly that instead of "quota exceeded", which would send
+you hunting for a bug in your own prompt. A refusal is remembered for ten
+minutes so a retry costs nothing — the model does retry, observed twice on
+the first run despite being told not to.
+
+Assembling media stays free and always worked: `create_video` builds an mp4
+or mkv from images you already have, `create_audio` speaks with the local
+voice, and `convert_media` changes containers.
+
 **An eval suite from day one.**
 
 153 offline cases covering safety and routing — hard-deny, injection detection,
@@ -397,7 +419,7 @@ jarvis/
 │   ├── taint.py       injection detection and the taint ledger
 │   ├── approval.py    four-layer gate, secret redaction
 │   └── trash.py       deletion you can take back
-├── tools/             60 tools, schemas generated from type hints
+├── tools/             62 tools, schemas generated from type hints
 ├── memory/            SQLite + FTS5
 ├── voice/             faster-whisper in, Piper out, wake word, push-to-talk
 ├── triggers/          scheduled and event-driven autonomy

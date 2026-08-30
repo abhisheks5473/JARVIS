@@ -385,6 +385,13 @@ INTEGRATIONS = Integrations()
 
 
 # ---------------------------------------------------------------- misc
+# Generation models. Both are listed by the API and both 429 on a free-tier
+# key -- measured, with a text call succeeding on the same key either side of
+# the attempt. They work the moment billing is enabled, and are overridable
+# because Google retires these IDs faster than the text ones.
+IMAGE_MODEL = os.getenv("JARVIS_IMAGE_MODEL", "gemini-2.5-flash-image")
+VIDEO_MODEL = os.getenv("JARVIS_VIDEO_MODEL", "veo-3.1-fast-generate-preview")
+
 API_KEY_ENV = "GEMINI_API_KEY"
 HUD_ENABLED = os.getenv("JARVIS_HUD", "1") == "1"
 LOG_LEVEL = os.getenv("JARVIS_LOG_LEVEL", "INFO")

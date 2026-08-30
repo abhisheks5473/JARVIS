@@ -141,6 +141,8 @@ _PROFILE_SIGNALS: list[tuple[str, re.Pattern[str]]] = [
         r"\b(pdf|docx?|word\s+doc|excel|xlsx|spreadsheet|powerpoint|pptx|"
         r"slideshow|deck|mp3|mp4|wav|m4a|gif|audio|video|narration|voiceover|"
         r"thumbnail|resize|report|invoice|certificate)\b|"
+        r"\b(generate|make|create|draw|design|paint)\b[^\n]{0,20}\b(image|picture|photo|logo|wallpaper|artwork|art|drawing|illustration|poster|icon|avatar)\b|"
+        r"\b(image|picture|photo|logo|wallpaper|illustration)\b[^\n]{0,16}\b(of|showing|with)\b|"
         r"\b(convert|export|save)\b[^\n]{0,20}\b(to|into|as)\b", re.I)),
     ("dev", re.compile(
         r"\b(git|commit|branch|repo|pytest|build|compile|stack trace|"

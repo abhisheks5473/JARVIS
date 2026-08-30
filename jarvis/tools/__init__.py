@@ -30,6 +30,7 @@ from . import time_tools  # noqa: F401,E402
 from . import vision  # noqa: F401,E402
 from . import web  # noqa: F401,E402
 from . import google_apps  # noqa: F401,E402
+from . import imagery  # noqa: F401,E402
 from . import whatsapp  # noqa: F401,E402
 
 # Gemini's built-in server-side tools.
@@ -75,6 +76,7 @@ PROFILES: dict[str, set[str]] = {
     "create": {
         "create_document", "read_document", "create_audio", "create_video",
         "convert_media", "edit_image", "media_info",
+        "generate_image", "generate_video",
         "read_file", "list_directory", "see_screen", "write_file",
     },
     # Conversation only. For when quota is nearly gone.
