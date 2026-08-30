@@ -223,6 +223,15 @@ def create_document(
 
     target = _target(path, fmt)
 
+    # Models routinely pass title="Report" and open the content with
+    # "# Report", which renders the heading twice. Dropping the duplicate is
+    # kinder than telling the model off in the description, and it showed up
+    # on the very first real document produced.
+    if title.strip():
+        lines = content.lstrip().splitlines()
+        if lines and lines[0].lstrip("# ").strip().lower() == title.strip().lower():
+            content = "\n".join(lines[1:]).lstrip("\n")
+
     try:
         if fmt == "pdf":
             _write_pdf(target, content, title)
