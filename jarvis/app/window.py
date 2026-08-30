@@ -282,8 +282,37 @@ class JarvisWindow(ctk.CTk):
                 )
             else:
                 self._write(f"Hotkeys unavailable: {self.hotkeys.last_error}", "warn")
+                self._bind_local_keys()
         except Exception as exc:  # noqa: BLE001
             self._write(f"Hotkeys unavailable: {type(exc).__name__}", "warn")
+            self._bind_local_keys()
+
+    def _bind_local_keys(self) -> None:
+        """Window shortcuts, for when a global listener is not possible.
+
+        These only fire while JARVIS is focused, which is a real loss -- the
+        point of push-to-talk is reaching it from another application. But
+        they go through Tk's own event loop on the main thread, so they
+        cannot abort the process the way a global keyboard hook can on macOS.
+        """
+        combos = (
+            ("<Command-j>", "cmd+j", self.bridge.listen),
+            ("<Command-period>", "cmd+.", self.bridge.stop_speaking),
+            ("<Control-Alt-j>", "ctrl+alt+j", self.bridge.listen),
+            ("<Control-Alt-space>", "ctrl+alt+space", self.bridge.stop_speaking),
+        )
+        bound = []
+        for sequence, label, action in combos:
+            try:
+                self.bind_all(sequence, lambda _event, act=action: act())
+            except Exception:  # noqa: BLE001 - Tk rejects unknown sequences
+                continue
+            bound.append(label)
+
+        if bound:
+            self._write(
+                "While this window is focused: " + " · ".join(bound), "muted"
+            )
 
     def _start_scheduler(self) -> None:
         try:

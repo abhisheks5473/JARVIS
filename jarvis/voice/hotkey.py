@@ -12,6 +12,7 @@ something has gone wrong with audio in the first place.
 """
 from __future__ import annotations
 
+import sys
 import threading
 from collections.abc import Callable
 
@@ -94,6 +95,26 @@ class Hotkeys:
 
     # ------------------------------------------------------------ lifecycle
     def start(self) -> bool:
+        # pynput's macOS backend maps key codes by calling the Text Services
+        # Manager through ctypes, from its own listener thread. macOS 26
+        # hardened those functions with dispatch_assert_queue, so being off
+        # the main queue is no longer merely discouraged -- it aborts the
+        # process. The crash report from a Mac shows it exactly:
+        #
+        #   Thread-1  ctypes -> TSMGetInputSourceProperty
+        #             -> dispatch_assert_queue -> _dispatch_assert_queue_fail
+        #             EXC_BREAKPOINT (SIGTRAP)
+        #
+        # There is no thread this can safely run on: Tk owns the main one.
+        # The window binds the same shortcuts locally instead, which work
+        # whenever JARVIS is focused and cannot take the process down.
+        if sys.platform == "darwin":
+            self.last_error = (
+                "global hotkeys are unavailable on macOS: pynput's key "
+                "mapping must run on the main thread, which the window owns"
+            )
+            return False
+
         try:
             from pynput import keyboard
         except ImportError as exc:

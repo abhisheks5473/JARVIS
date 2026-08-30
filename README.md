@@ -200,7 +200,7 @@ microphone hears silence — all without a single error message.
 | `no such file or directory` | The path in the file is wrong. Redo from step 2 |
 | It opens, but the mouse and screen tools do nothing | Step 8 — and remember to quit Terminal fully afterwards |
 | `command not found: brew` | Homebrew is not installed. Get it from **brew.sh**, then redo the Quick start |
-| `zsh: trace trap` and "Python quit unexpectedly", with no window | A native crash rather than a Python error, so there is no traceback to read. This was the menu-bar icon calling AppKit off the main thread; fixed — update to the current version |
+| `zsh: trace trap` and "Python quit unexpectedly" | A native crash, so there is no traceback to read. Two causes were found and fixed on macOS 26 — the menu-bar icon, and the global hotkey listener — both calling Apple frameworks off the main thread. Update to the current version. If it still happens, click **Report…** in the crash dialog and look at the line under "Triggered by Thread": the library named there is the culprit |
 
 ### Optional: a real app icon
 
@@ -281,6 +281,7 @@ there rather than silently misbehaving.
 | Media keys and volume | yes | no |
 | WhatsApp messages and calls | yes | no |
 | Gmail and Drive in the browser | yes | no |
+| Global hotkeys from any app | yes | no — window shortcuts only |
 | Menu-bar / tray icon | yes | no — closing the window quits |
 | Shareable .exe | yes | no — run from source |
 
@@ -305,6 +306,13 @@ something there is wrong, it is worth reporting rather than working around.
 | `ctrl+alt+j` | push to talk |
 | `ctrl+alt+space` | interrupt it mid-sentence |
 | `ctrl+alt+q` | kill switch |
+
+Those are **global** on Windows — they work from any application. On macOS
+they are **window shortcuts only** (`cmd+j` to talk, `cmd+.` to interrupt), and
+fire while JARVIS is focused. pynput's macOS backend maps key codes through
+the Text Services Manager from its listener thread, and macOS 26 made those
+functions abort the process when called off the main queue. Tk owns the main
+thread, so there is nowhere safe left to run a global hook.
 
 The kill switch is a key combination rather than a voice command on purpose: a
 voice-activated stop fails exactly when you need it, which is when it is
