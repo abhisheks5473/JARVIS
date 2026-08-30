@@ -110,7 +110,8 @@ PROFILES: dict[str, set[str]] = {
     # Messaging and calls.
     "whatsapp": {
         "send_whatsapp", "auto_decline_calls", "declined_calls",
-        "decline_whatsapp_call", "whatsapp_windows", "launch_app", "see_screen",
+        "decline_whatsapp_call", "whatsapp_windows", "whatsapp_call_probe",
+        "launch_app", "see_screen",
     },
     # Recovering something deleted.
     "recovery": {"list_trash", "restore_from_trash", "list_directory", "read_file"},

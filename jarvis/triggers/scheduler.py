@@ -154,9 +154,6 @@ class Nerves:
         self.scheduler = None
         self.watcher = DownloadsWatcher()
         self.calls = CallWatcher(notify=notify)
-        # Module-level handle so the whatsapp tools can reach the running
-        # watcher. There is exactly one scheduler per process.
-        globals()["_ACTIVE_CALL_WATCHER"] = self.calls
         self.last_error = ""
 
     def start(self, briefing_hour: int = 7, briefing_minute: int = 0) -> bool:
@@ -209,6 +206,12 @@ class Nerves:
         except Exception as exc:  # noqa: BLE001
             self.last_error = f"could not start the scheduler: {exc}"
             return False
+
+        # Published only once the jobs are genuinely running. Setting this in
+        # __init__ meant auto_decline_calls could accept a rule and report
+        # success while nothing was polling for calls -- the rule was armed
+        # and simply never fired.
+        globals()["_ACTIVE_CALL_WATCHER"] = self.calls
         return True
 
     def _check_downloads(self) -> None:
@@ -304,28 +307,34 @@ class CallWatcher:
         if not self.enabled or not self.rules:
             return
         try:
-            from ..tools.whatsapp import decline_whatsapp_call, find_call_window, send_whatsapp
+            from ..tools.whatsapp import decline_whatsapp_call, find_incoming_call, send_whatsapp
         except Exception:  # noqa: BLE001 - missing libs must not kill the scheduler
             return
 
         try:
-            found = find_call_window()
+            call = find_incoming_call()
         except Exception:  # noqa: BLE001
             return
-        if found is None:
+        if call is None:
             self._handled = ""       # the call ended; allow the next one
             return
 
-        _handle, title = found
-        # One action per ringing call, not one per poll.
-        if title == self._handled and time.time() - self._handled_at < 120:
+        # A name the rules can be matched against. An unnamed call still
+        # matches "*", but never matches a rule naming somebody.
+        title = call.get("caller") or ""
+        # One action per ringing call, not one per poll. The key is never
+        # empty, because "" is what _handled is reset to between calls -- an
+        # unnamed call would otherwise look like one already dealt with, and
+        # never be declined at all.
+        key = title or "(unnamed call)"
+        if key == self._handled and time.time() - self._handled_at < 120:
             return
 
         matched, reply = self._matches(title)
         if not matched:
             return
 
-        self._handled, self._handled_at = title, time.time()
+        self._handled, self._handled_at = key, time.time()
         record = {"caller": title, "at": time.time(), "replied": False}
 
         try:

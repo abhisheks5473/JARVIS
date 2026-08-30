@@ -26,6 +26,7 @@ wrong match is visible in the transcript instead of silent.
 from __future__ import annotations
 
 import os
+import re
 import time
 
 from .base import ToolError, tool
@@ -204,6 +205,125 @@ def whatsapp_windows() -> dict:
     }
 
 
+# --------------------------------------------------------------- call detection
+# WhatsApp's window is a WebView: the whole interface is web content drawn
+# *inside* the one top-level window. An incoming call is therefore usually not
+# a new window at all, which is why looking for one found nothing. UI
+# Automation can see into the web content and find the Decline button itself,
+# which is both what a person would click and something that keeps working
+# when the layout moves.
+SEARCH_DEPTH = int(os.getenv("JARVIS_WHATSAPP_UIA_DEPTH", "28"))
+DECLINE_RE = os.getenv(
+    "JARVIS_WHATSAPP_DECLINE_RE", r"(?i)^(decline|reject|ignore|dismiss)\b"
+)
+
+# Labels that sit inside a call panel but are never the caller's name.
+_NOT_A_NAME = {
+    "decline", "reject", "ignore", "dismiss", "accept", "answer", "mute",
+    "video", "voice", "speaker", "end call", "incoming call", "calling",
+    "ringing", "whatsapp", "incoming voice call", "incoming video call",
+}
+_TIMER = re.compile(r"^\d{1,2}:\d{2}(:\d{2})?$")
+
+
+def _uia():
+    try:
+        import uiautomation
+    except ImportError:
+        raise ToolError(
+            "the uiautomation library is missing",
+            hint="run: pip install uiautomation",
+        ) from None
+    # Without this every miss blocks for the default timeout, and a miss is
+    # the common case -- most polls happen when nobody is calling.
+    uiautomation.SetGlobalSearchTimeout(0)
+    return uiautomation
+
+
+_ROOT: dict = {"hwnd": 0, "control": None}
+
+
+def _uia_root():
+    """The WhatsApp window as a UIA control, cached between polls."""
+    auto = _uia()
+    hwnd = _main_window()
+    if _ROOT["hwnd"] != hwnd or _ROOT["control"] is None:
+        _ROOT["hwnd"], _ROOT["control"] = hwnd, auto.ControlFromHandle(hwnd)
+    return _ROOT["control"]
+
+
+def _texts_under(control, depth: int = 4, budget: int = 120) -> list[str]:
+    """Names of the text elements below a control, nearest first."""
+    out: list[str] = []
+    stack = [(control, 0)]
+    while stack and budget > 0:
+        node, level = stack.pop(0)
+        if level > depth:
+            continue
+        try:
+            children = node.GetChildren()
+        except Exception:  # noqa: BLE001 - the tree changes while it is read
+            continue
+        for child in children:
+            budget -= 1
+            try:
+                name = (child.Name or "").strip()
+                kind = child.ControlTypeName
+            except Exception:  # noqa: BLE001
+                continue
+            if name and kind in ("TextControl", "ButtonControl"):
+                out.append(name)
+            stack.append((child, level + 1))
+    return out
+
+
+def _caller_near(button) -> str:
+    """Best guess at who is calling, read from the panel around the button."""
+    node = button
+    for _ in range(5):
+        try:
+            parent = node.GetParentControl()
+        except Exception:  # noqa: BLE001
+            break
+        if parent is None:
+            break
+        node = parent
+        for text in _texts_under(node):
+            lowered = text.lower()
+            if lowered in _NOT_A_NAME or _TIMER.match(text):
+                continue
+            if 2 <= len(text) <= 48:
+                return text
+    return ""
+
+
+def find_incoming_call() -> dict | None:
+    """Detect a ringing call, and return how to decline it.
+
+    Returns a dict with the caller's name and the control to press, or None
+    when nothing is ringing. Never raises: it runs on the scheduler thread
+    every couple of seconds, and an exception there would stop the watcher.
+    """
+    auto = _uia()
+    try:
+        button = auto.ButtonControl(
+            searchFromControl=_uia_root(),
+            searchDepth=SEARCH_DEPTH,
+            RegexName=DECLINE_RE,
+        )
+        if button.Exists(0, 0):
+            return {"caller": _caller_near(button), "button": button, "via": "uia"}
+    except Exception:  # noqa: BLE001 - a stale control invalidates the cache
+        _ROOT["control"] = None
+
+    # Older builds, and the tray case, do open a real call window.
+    window = find_call_window()
+    if window is not None:
+        handle, title = window
+        return {"caller": title, "handle": handle, "via": "window"}
+    return None
+
+
 def find_call_window() -> tuple[int, str] | None:
     """Return (handle, title) of an incoming-call window, if one is up.
 
@@ -212,8 +332,16 @@ def find_call_window() -> tuple[int, str] | None:
     is not the app itself -- which in practice means a call. The title usually
     carries the caller's name, which is what the watcher matches on.
     """
-    for handle, title, cls, visible in _whatsapp_windows():
-        if not visible or "WinUIDesktopWin32WindowClass" in cls:
+    try:
+        main = _main_window()
+    except ToolError:
+        return None
+    # The main window is excluded by *handle*. Excluding it by window class was
+    # the original bug: a WinUI3 call window is the same framework and carries
+    # the same class, so the filter meant to skip the main window skipped the
+    # call window with it, and nothing was ever found.
+    for handle, title, _cls, visible in _whatsapp_windows():
+        if not visible or handle == main:
             continue
         stripped = title.strip()
         if not stripped or stripped == "WhatsApp":
@@ -229,21 +357,27 @@ def decline_whatsapp_call() -> dict:
     Only useful while a call is actually coming in. If nothing is ringing it
     says so rather than pressing keys into whatever happens to be focused.
     """
-    pyautogui = _pyautogui()
+    call = find_incoming_call()
+    if call is None:
+        return {"declined": False, "note": "nothing is ringing"}
 
-    found = find_call_window()
-    if found is None:
-        return {"declined": False, "note": "no incoming call window is open"}
+    if call["via"] == "uia":
+        # Press the actual Decline button. Sending Escape at the window was
+        # the old approach and it never reached the call at all, because the
+        # call is drawn inside the main window rather than in one of its own.
+        try:
+            call["button"].Click(simulateMove=False)
+        except Exception as exc:  # noqa: BLE001
+            raise ToolError(
+                f"found the decline button but could not press it ({type(exc).__name__})",
+                hint="decline it by hand this once, and report this",
+            ) from None
+        return {"declined": True, "caller": call["caller"] or "unknown", "how": "button"}
 
-    handle, title = found
-    _focus(handle)
-    # Escape declines in current builds, and is the safest key to send at a
-    # window whose layout cannot be inspected: the worst case is closing
-    # something rather than answering a call by accident.
-    pyautogui.press("escape")
+    _focus(call["handle"])
+    _pyautogui().press("escape")
     time.sleep(0.3)
-
-    return {"declined": True, "window": title}
+    return {"declined": True, "caller": call["caller"], "how": "escape"}
 
 
 # The watcher lives in the scheduler because it must keep running between
@@ -326,3 +460,41 @@ def declined_calls() -> dict:
         ],
         "total_declined": len(watcher.declined),
     }
+
+
+@tool(group="whatsapp")
+def whatsapp_call_probe() -> dict:
+    """Show what WhatsApp is displaying right now, for diagnosing calls.
+
+    Run this **while a call is actually ringing**. It reports whether the
+    decline button was found and what every button on screen is called, which
+    is what identifies a call on this particular build. If declining is not
+    working, this is the tool that says why.
+    """
+    auto = _uia()
+    report: dict = {"windows": len(_whatsapp_windows())}
+
+    call = find_incoming_call()
+    report["ringing"] = call is not None
+    if call is not None:
+        report["caller"] = call["caller"] or "(name not found)"
+        report["detected_via"] = call["via"]
+
+    try:
+        buttons = auto.ButtonControl(searchFromControl=_uia_root(), searchDepth=SEARCH_DEPTH)
+        names, seen = [], set()
+        for name in _texts_under(_uia_root(), depth=SEARCH_DEPTH, budget=900):
+            if name not in seen and len(name) < 40:
+                seen.add(name)
+                names.append(name)
+        report["on_screen"] = names[:60]
+        del buttons
+    except Exception as exc:  # noqa: BLE001
+        report["on_screen_error"] = type(exc).__name__
+
+    report["note"] = (
+        "if ringing is false while a call is on screen, the decline button is "
+        "named something this build does not expect -- look through on_screen "
+        "for it and set JARVIS_WHATSAPP_DECLINE_RE in .env to match"
+    )
+    return report
