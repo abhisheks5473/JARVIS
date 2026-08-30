@@ -109,7 +109,7 @@ PROFILES: dict[str, set[str]] = {
                  "send_notification"},
     # Messaging and calls.
     "whatsapp": {
-        "send_whatsapp", "auto_decline_calls", "declined_calls",
+        "send_whatsapp", "call_whatsapp", "auto_decline_calls", "declined_calls",
         "decline_whatsapp_call", "whatsapp_windows", "whatsapp_call_probe",
         "launch_app", "see_screen",
     },

@@ -124,7 +124,9 @@ _PROFILE_SIGNALS: list[tuple[str, re.Pattern[str]]] = [
         r"\b(decline|reject|ignore|silence|block)\b[^\n]{0,28}\bcalls?\b|"
         r"\bcalls?\b[^\n]{0,28}\b(decline|reject|ignore|silence)\b|"
         r"\b(message|text|msg|dm)\b[^\n]{0,24}\b(him|her|them|saying|that)\b|"
-        r"\b(who\s+(has\s+)?called|call\s+log|missed\s+calls?|declined\s+calls?)\b",
+        r"\b(who\s+(has\s+)?called|call\s+log|missed\s+calls?|declined\s+calls?)\b|"
+        r"\b(video|voice)\s+calls?\b|"
+        r"\b(call|ring|phone)\s+(?!the\b|a\b|an\b|it\b|this\b|that\b|back\b|out\b|off\b|function\b|method\b|api\b|endpoint\b|script\b|command\b)[\w'-]+",
         re.I)),
     # Producing a file.
     ("create", re.compile(

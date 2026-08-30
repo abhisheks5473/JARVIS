@@ -129,6 +129,47 @@ def _pyautogui():
     return pyautogui
 
 
+# Labels that live in the chat header but are not the contact's name.
+_HEADER_CHROME = {
+    "voice call", "video call", "search", "menu", "profile details",
+    "close", "back", "chat menu", "more options",
+}
+
+
+def _open_chat(contact: str) -> None:
+    """Focus WhatsApp and open a contact's chat via the search box."""
+    pyautogui = _pyautogui()
+    _focus(_main_window())
+
+    pyautogui.hotkey("ctrl", "f")          # focus the search box
+    time.sleep(0.4)
+    pyautogui.hotkey("ctrl", "a")          # clear whatever was there
+    pyautogui.press("delete")
+    pyautogui.write(contact, interval=TYPE_INTERVAL)
+    time.sleep(SEARCH_WAIT)                # results need time to appear
+    pyautogui.press("enter")               # open the top result
+    time.sleep(0.8)
+
+
+def _open_chat_name(anchor) -> str:
+    """The name on the chat header, read from around a header button."""
+    node = anchor
+    for _ in range(4):
+        try:
+            parent = node.GetParentControl()
+        except Exception:  # noqa: BLE001
+            break
+        if parent is None:
+            break
+        node = parent
+        for text in _texts_under(node, depth=3):
+            if text.lower().strip() in _HEADER_CHROME or _TIMER.match(text):
+                continue
+            if len(text.strip()) >= 2:
+                return text.strip()
+    return ""
+
+
 @tool(group="whatsapp")
 def send_whatsapp(contact: str, message: str) -> dict:
     """Send a WhatsApp message to a contact by name.
@@ -139,6 +180,10 @@ def send_whatsapp(contact: str, message: str) -> dict:
 
     The message is sent immediately and cannot be recalled. Report exactly
     what was sent and to whom.
+
+    This is not a substitute for placing a call. If the user asked you to
+    call someone, use call_whatsapp; do not send a message instead and
+    report it as the next best thing.
 
     Args:
         contact: The contact or group name as it appears in WhatsApp.
@@ -160,16 +205,7 @@ def send_whatsapp(contact: str, message: str) -> dict:
     text = " ".join(message.split())
 
     pyautogui = _pyautogui()
-    _focus(_main_window())
-
-    pyautogui.hotkey("ctrl", "f")          # focus the search box
-    time.sleep(0.4)
-    pyautogui.hotkey("ctrl", "a")          # clear whatever was there
-    pyautogui.press("delete")
-    pyautogui.write(contact, interval=TYPE_INTERVAL)
-    time.sleep(SEARCH_WAIT)                # results need time to appear
-    pyautogui.press("enter")               # open the top result
-    time.sleep(0.8)
+    _open_chat(contact)
 
     pyautogui.write(text, interval=TYPE_INTERVAL)
     time.sleep(0.3)
@@ -498,3 +534,67 @@ def whatsapp_call_probe() -> dict:
         "for it and set JARVIS_WHATSAPP_DECLINE_RE in .env to match"
     )
     return report
+
+
+@tool(group="whatsapp")
+def call_whatsapp(contact: str, video: bool = False) -> dict:
+    """Place a WhatsApp voice or video call to a contact by name.
+
+    Use this whenever the user asks to call, ring or phone someone. It opens
+    their chat and presses the call button, exactly as a person would.
+
+    The call is placed immediately and the other person's phone rings, so get
+    the name right. If the chat that opens belongs to somebody else this
+    refuses to dial and says whose chat it found -- calling the wrong person
+    is not a mistake that can be taken back.
+
+    Args:
+        contact: The contact name as it appears in WhatsApp.
+        video: True for a video call, False for a voice call.
+    """
+    if not contact.strip():
+        raise ToolError(
+            "no contact given", hint="give the name as it appears in WhatsApp"
+        )
+
+    auto = _uia()
+    wanted = "Video call" if video else "Voice call"
+    _open_chat(contact)
+
+    try:
+        button = auto.ButtonControl(
+            searchFromControl=_uia_root(), searchDepth=SEARCH_DEPTH, Name=wanted
+        )
+        found = button.Exists(0, 0)
+    except Exception:  # noqa: BLE001 - a stale control invalidates the cache
+        _ROOT["control"] = None
+        found = False
+
+    if not found:
+        raise ToolError(
+            f"could not find the {wanted} button",
+            hint=(
+                "the chat may not have opened -- check the contact name, or "
+                "run whatsapp_call_probe to see what is on screen"
+            ),
+        )
+
+    # Confirm the open chat is the person asked for before dialling. The
+    # search box takes the top result, and for a call a wrong top result
+    # means ringing a stranger rather than a recoverable typo.
+    opened = _open_chat_name(button)
+    wanted_l, opened_l = contact.strip().lower(), opened.lower()
+    if opened and wanted_l not in opened_l and opened_l not in wanted_l:
+        raise ToolError(
+            f"searching for {contact!r} opened {opened!r} instead, so nothing was dialled",
+            hint="use the name exactly as WhatsApp shows it, and try again",
+        )
+
+    button.Click(simulateMove=False)
+    time.sleep(1.0)
+
+    return {
+        "calling": opened or contact,
+        "kind": "video" if video else "voice",
+        "note": "the call is ringing now; it was not answered by this tool",
+    }
