@@ -25,7 +25,7 @@ from tkinter import font as tkfont
 
 import customtkinter as ctk
 
-from .. import config
+from .. import config, providers
 from ..quota import Mode, governor
 from .bridge import AgentBridge, Event
 
@@ -219,17 +219,25 @@ class JarvisWindow(ctk.CTk):
         self.entry.grid(row=0, column=0, sticky="ew", padx=(16, 8), pady=12)
         self.entry.bind("<Return>", lambda _e: self._submit())
 
+        # Always present, never conditional: changing provider or key is
+        # something you may need at any moment, including when nothing works.
+        self.provider_button = ctk.CTkButton(
+            bar, text="Key", width=56, height=44, fg_color=FIELD,
+            hover_color=LINE, text_color=MUTED, command=self.open_provider,
+        )
+        self.provider_button.grid(row=0, column=1, pady=12)
+
         self.mic_button = ctk.CTkButton(
             bar, text="Talk", width=76, height=44, fg_color=FIELD,
             hover_color=LINE, text_color=TEXT, command=self.bridge.listen,
         )
-        self.mic_button.grid(row=0, column=1, pady=12)
+        self.mic_button.grid(row=0, column=2, pady=12)
 
         self.send_button = ctk.CTkButton(
             bar, text="Send", width=76, height=44, fg_color=ACCENT,
             hover_color="#1f6feb", command=self._submit,
         )
-        self.send_button.grid(row=0, column=2, padx=(8, 16), pady=12)
+        self.send_button.grid(row=0, column=3, padx=(8, 16), pady=12)
 
         self.status = ctk.CTkLabel(
             self, text="starting...", text_color=MUTED, anchor="w",
@@ -251,11 +259,16 @@ class JarvisWindow(ctk.CTk):
         self._write("Starting up.", "muted")
         self.bridge.start()
 
+        current = providers.active()
         if not config.api_key_present():
             self._write(
-                "No GEMINI_API_KEY in .env, so nothing will reach the model. "
-                "Get one free at aistudio.google.com/apikey.", "bad",
+                f"No {current.env_var} set, so nothing will reach the model. "
+                "Press Key, or type /key, to choose a provider and paste one.",
+                "bad",
             )
+            self.after(400, self.open_provider)
+        else:
+            self._write(f"Provider: {current.label}.", "muted")
 
         self._start_hotkeys()
         self._start_scheduler()
@@ -286,6 +299,22 @@ class JarvisWindow(ctk.CTk):
         except Exception as exc:  # noqa: BLE001
             self._write(f"Hotkeys unavailable: {type(exc).__name__}", "warn")
             self._bind_local_keys()
+
+    def open_provider(self) -> None:
+        """Open the provider and key panel. Available for the whole session."""
+        try:
+            from .settings import ProviderDialog
+
+            ProviderDialog(self, on_saved=self._provider_saved)
+        except Exception as exc:  # noqa: BLE001
+            self._write(f"Could not open settings: {type(exc).__name__}: {exc}", "bad")
+
+    def _provider_saved(self, provider) -> None:
+        self._write(
+            f"Now using {provider.label}, model {config.Models.FAST.id}. "
+            "The conversation continues where it left off.",
+            "jarvis",
+        )
 
     def _bind_local_keys(self) -> None:
         """Window shortcuts, for when a global listener is not possible.
@@ -451,6 +480,8 @@ class JarvisWindow(ctk.CTk):
 
             for fact in memory.all_facts(20):
                 self._write(f"  [{fact.id}] {fact.fact}", "tool")
+        elif name == "key":
+            self.open_provider()
         elif name == "wake":
             parts = raw[1:].split(None, 1)
             argument = parts[1].strip() if len(parts) > 1 else ""
@@ -466,7 +497,7 @@ class JarvisWindow(ctk.CTk):
             self.bridge.speak_replies = not self.bridge.speak_replies
             self._write(f"Speaking replies: {self.bridge.speak_replies}", "muted")
         else:
-            self._write("Commands: /clear /quota /memory /voice /wake /quit", "muted")
+            self._write("Commands: /clear /quota /memory /voice /wake /key /quit", "muted")
 
     def _set_busy(self, busy: bool) -> None:
         self.send_button.configure(state="disabled" if busy else "normal")

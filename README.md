@@ -354,6 +354,45 @@ If it misfires, `JARVIS_WAKE_SENSITIVITY` runs from 0 (strict) to 1 (eager).
 Re-recording usually helps more: say the phrase the way you actually say it,
 not the way you think you should. `/wake off` forgets it.
 
+### Provider and API key
+
+There is a **Key** button next to Talk, and a `/key` command. Either opens the
+provider panel, at any point in a session — pick a different service, paste a
+different key, and carry on in the same conversation. Nothing restarts: saving
+rewrites `.env`, updates the running process, rebuilds the model ladder for the
+new provider and drops the cached client.
+
+| provider | key | notes |
+|---|---|---|
+| **Google Gemini** | free tier | what this app is built and tested on |
+| OpenAI | paid | |
+| Anthropic Claude | paid | |
+| Groq | free tier, rate limited | |
+| OpenRouter | many models, some free | |
+| Together AI | paid | |
+| Ollama | none | runs on your machine |
+| LM Studio | none | runs on your machine |
+
+Keys already saved for other providers are kept, so moving between two services
+does not mean pasting both again, and an existing key is only ever shown back
+masked (`AQ.A...bAIw (53 chars)`) — enough to tell which key is in there,
+useless on a screen share.
+
+Switching provider **clears any pinned model IDs**. Leaving them would send
+`gemini-3.5-flash-lite` to Groq, which fails looking exactly like a bad key
+rather than a stale setting.
+
+Non-Gemini providers need their client library — `pip install openai` or
+`pip install anthropic`. They are not in `requirements.txt` because they are
+dead weight for anyone who never leaves Gemini, and the error says which one to
+install.
+
+**Worth knowing:** the Gemini path is the one this project runs on. The other
+two protocols are translated at the edge and unit-tested in both directions
+against real tool declarations and real history — but no live call has been
+made through either, because there was no key to make one with. The
+translation is verified; the round trip against a running service is not.
+
 ### Memory across sessions
 
 Two different things are remembered, and they work differently.
@@ -428,6 +467,7 @@ at all.
 /wake PHRASE record a wake word in your own voice (five samples)
 /wake off    forget it and stop listening
 /voice       speak replies, or don't
+/key         change model provider or API key (also the Key button)
 ```
 
 ### Worth trying

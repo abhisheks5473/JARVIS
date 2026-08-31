@@ -11,6 +11,8 @@ from __future__ import annotations
 import os
 import sys
 from dataclasses import dataclass
+
+from . import providers
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -157,21 +159,35 @@ class ModelTier:
 
 
 class Models:
-    # Routine turns: pick a tool, answer a short question, classify intent.
-    # Flash-Lite is built for exactly this and is the cheapest thing that works.
-    FAST = ModelTier(os.getenv("JARVIS_MODEL_FAST", "gemini-3.5-flash-lite"), "low", 1)
+    """The model ladder, whichever provider is selected.
 
-    # Anything needing real reasoning: multi-step plans, code, ambiguity.
-    SMART = ModelTier(os.getenv("JARVIS_MODEL_SMART", "gemini-3.7-flash"), "medium", 4)
+    Defaults come from the provider entry, so switching provider switches the
+    models with it; JARVIS_MODEL_* still overrides either way. refresh() puts
+    the ladder back in step after the provider is changed while running, which
+    the settings panel does without restarting anything.
+    """
 
-    # Deliberate, rare, expensive. Reserved for explicit "think hard" requests.
-    DEEP = ModelTier(os.getenv("JARVIS_MODEL_DEEP", "gemini-3.7-flash"), "high", 10)
+    FAST = SMART = DEEP = VISION = SUMMARY = ModelTier("", "low", 1)
 
-    # Vision subagent. Kept separate so screenshots never ride the main model.
-    VISION = ModelTier(os.getenv("JARVIS_MODEL_VISION", "gemini-3.5-flash-lite"), "minimal", 1)
-
-    # Summarising old conversation turns. Must be cheap or it defeats itself.
-    SUMMARY = ModelTier(os.getenv("JARVIS_MODEL_SUMMARY", "gemini-3.5-flash-lite"), "minimal", 1)
+    @classmethod
+    def refresh(cls) -> None:
+        chosen = providers.active()
+        # Routine turns: pick a tool, answer a short question, classify intent.
+        cls.FAST = ModelTier(os.getenv("JARVIS_MODEL_FAST", chosen.fast), "low", 1)
+        # Anything needing real reasoning: multi-step plans, code, ambiguity.
+        cls.SMART = ModelTier(
+            os.getenv("JARVIS_MODEL_SMART", chosen.smart), "medium", 4
+        )
+        # Deliberate, rare, expensive. For explicit "think hard" requests.
+        cls.DEEP = ModelTier(os.getenv("JARVIS_MODEL_DEEP", chosen.smart), "high", 10)
+        # Vision subagent, kept separate so screenshots never ride the main model.
+        cls.VISION = ModelTier(
+            os.getenv("JARVIS_MODEL_VISION", chosen.fast), "minimal", 1
+        )
+        # Summarising old turns. Must be cheap or it defeats itself.
+        cls.SUMMARY = ModelTier(
+            os.getenv("JARVIS_MODEL_SUMMARY", chosen.fast), "minimal", 1
+        )
 
     @classmethod
     def all_tiers(cls) -> tuple[ModelTier, ...]:
@@ -392,10 +408,27 @@ INTEGRATIONS = Integrations()
 IMAGE_MODEL = os.getenv("JARVIS_IMAGE_MODEL", "gemini-2.5-flash-image")
 VIDEO_MODEL = os.getenv("JARVIS_VIDEO_MODEL", "veo-3.1-fast-generate-preview")
 
-API_KEY_ENV = "GEMINI_API_KEY"
+def __getattr__(name: str):
+    """API_KEY_ENV follows the selected provider.
+
+    It was a constant, and a dozen call sites read it as one. Making it a
+    module attribute lookup means every one of them becomes provider-aware
+    without being touched, and without a stale copy surviving a switch.
+    """
+    if name == "API_KEY_ENV":
+        return providers.active().env_var
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def refresh() -> None:
+    """Re-read anything that depends on which provider is selected."""
+    Models.refresh()
 HUD_ENABLED = os.getenv("JARVIS_HUD", "1") == "1"
 LOG_LEVEL = os.getenv("JARVIS_LOG_LEVEL", "INFO")
 
 
 def api_key_present() -> bool:
-    return bool(os.getenv(API_KEY_ENV, "").strip())
+    return providers.key_present()
+
+
+Models.refresh()

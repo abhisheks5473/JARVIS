@@ -29,6 +29,7 @@ from google import genai
 from google.genai import errors
 
 from . import config
+from . import adapters, providers
 from .config import ModelTier, Models
 from .quota import Mode, governor
 
@@ -108,6 +109,10 @@ class GeminiClient:
         self._client: genai.Client | None = None
         self.last_error: str = ""
 
+    def reset(self) -> None:
+        """Forget the cached SDK client, after the provider or key changed."""
+        self._client = None
+
     # ------------------------------------------------------------ lifecycle
     @property
     def sdk(self) -> genai.Client:
@@ -173,6 +178,22 @@ class GeminiClient:
             raise QuotaExhausted("quota stayed saturated; giving up on this turn")
 
         effective, degraded = self._effective_tier(tier, verdict.mode)
+
+        # Everything above -- the governor, the degradation ladder -- applies
+        # whoever answers. Only the wire format below differs, so the other
+        # providers branch off here rather than duplicating any of it.
+        protocol = providers.active().kind
+        if protocol != "gemini":
+            return self._call_foreign(
+                protocol=protocol,
+                effective=effective,
+                degraded=degraded,
+                input=input,
+                system_instruction=system_instruction,
+                tools=tools,
+                kind=kind,
+                max_output_tokens=max_output_tokens,
+            )
 
         generation_config: dict[str, Any] = {
             # Gemini 3 reasons internally by default. That is valuable for hard
@@ -281,6 +302,105 @@ class GeminiClient:
             )
 
         raise RuntimeError(f"exhausted retries: {last_exception}")
+
+    # -------------------------------------------------------- other providers
+    def _foreign_sdk(self, protocol: str, provider):
+        """The SDK for a non-Gemini provider, imported only when chosen.
+
+        openai and anthropic are not in requirements.txt: they are dead weight
+        for the majority who never leave Gemini, and a missing one is a clear
+        instruction rather than a mystery.
+        """
+        key = providers.key_for(provider) or "not-needed"
+        if protocol == "anthropic":
+            try:
+                import anthropic
+            except ImportError:
+                raise RuntimeError(
+                    f"{provider.label} needs its client library. "
+                    "Run: pip install anthropic"
+                ) from None
+            return anthropic.Anthropic(api_key=key)
+
+        try:
+            import openai
+        except ImportError:
+            raise RuntimeError(
+                f"{provider.label} needs the OpenAI client library. "
+                "Run: pip install openai"
+            ) from None
+        return openai.OpenAI(api_key=key, base_url=provider.base_url or None)
+
+    def _call_foreign(
+        self, protocol, effective, degraded, input, system_instruction,
+        tools, kind, max_output_tokens,
+    ) -> CallResult:
+        """One call to a provider that does not speak Interactions."""
+        provider = providers.active()
+        sdk = self._foreign_sdk(protocol, provider)
+        started = time.time()
+
+        try:
+            if protocol == "anthropic":
+                response = sdk.messages.create(
+                    model=effective.id,
+                    system=system_instruction or "",
+                    messages=adapters.to_anthropic_messages(input),
+                    tools=adapters.to_anthropic_tools(tools or []),
+                    max_tokens=max_output_tokens or 4096,
+                )
+                text, steps, usage = adapters.from_anthropic_response(response)
+            else:
+                response = sdk.chat.completions.create(
+                    model=effective.id,
+                    messages=adapters.to_openai_messages(
+                        input, system_instruction or ""
+                    ),
+                    tools=adapters.to_openai_tools(tools or []) or None,
+                    max_tokens=max_output_tokens or None,
+                )
+                text, steps, usage = adapters.from_openai_response(response)
+        except Exception as exc:  # noqa: BLE001 - every SDK raises its own
+            governor.record(
+                model=effective.id,
+                kind=kind,
+                latency_ms=int((time.time() - started) * 1000),
+                ok=False,
+                status=type(exc).__name__,
+            )
+            raise RuntimeError(f"{provider.label} refused the call: {exc}") from None
+
+        latency_ms = int((time.time() - started) * 1000)
+        governor.record(
+            model=effective.id,
+            kind=kind,
+            input_tokens=usage.get("input", 0),
+            output_tokens=usage.get("output", 0),
+            thought_tokens=0,
+            total_tokens=usage.get("total", 0),
+            latency_ms=latency_ms,
+            ok=True,
+        )
+
+        if not text and not any(s.type == "function_call" for s in steps):
+            raise ModelBlocked(
+                f"{provider.label} returned nothing usable. This is usually a "
+                "safety filter, a truncated response, or a model name that "
+                "does not exist on this provider."
+            )
+
+        return CallResult(
+            text=text,
+            steps=steps,
+            raw=response,
+            model=effective.id,
+            input_tokens=usage.get("input", 0),
+            output_tokens=usage.get("output", 0),
+            thought_tokens=0,
+            total_tokens=usage.get("total", 0),
+            latency_ms=latency_ms,
+            degraded=degraded,
+        )
 
     # ------------------------------------------------------------ streaming
     def consume_stream(
