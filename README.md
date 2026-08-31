@@ -19,60 +19,236 @@ where](#what-runs-where).
 
 ---
 
-## Quick start
+## Install it
 
-You need a Google account and about ten minutes, most of it waiting for
-downloads. No credit card.
+Nothing here assumes you have done this before. If you have, the short version
+is: Python 3.11+, a virtual environment, `pip install -r requirements.txt`,
+`python app.py`, and the app asks for a key on first launch. Everyone else,
+read on.
+
+**What you need:** a Windows or Mac laptop, an internet connection, a Google
+account, and about half an hour — most of it waiting for downloads. **No
+payment, no card.**
+
+**A word on the terminal.** Some steps use a black window where you type
+commands. It looks unfriendly and it is not: it does exactly what you type and
+nothing else. On a Mac, a command that worked usually prints **nothing at
+all** — silence means success there, not failure.
+
+---
+
+### Step 1 — install Python
+
+Python is the language JARVIS is written in. Your laptop probably does not
+have the right version yet.
 
 **Windows**
 
-```bash
-git clone https://github.com/abhisheks5473/JARVIS.git
-cd JARVIS
-python -m venv .venv
-.venv\Scripts\python.exe -m pip install -r requirements.txt
-.venv\Scripts\python.exe app.py
-```
-
-Python 3.11 or newer, from **python.org/downloads** — tick **"Add python.exe to
-PATH"** on the first installer screen or none of the above will be found.
+1. Go to **python.org/downloads**
+2. Click the big yellow **Download Python** button
+3. Open the file that downloads (bottom of your browser, or your Downloads folder)
+4. **Tick the box that says "Add python.exe to PATH".** It is at the *bottom*
+   of the first screen and it is easy to miss. This is the single step people
+   get wrong. Without it, every command below fails with "not recognized".
+5. Click **Install Now**, wait, then **Close**
 
 **macOS**
 
+1. Go to **python.org/downloads**
+2. Click the big yellow **Download Python** button
+3. Open the `.pkg` file that downloads
+4. Click **Continue** and **Install** through the installer, entering your Mac
+   password when asked
+
+Use the python.org installer rather than Homebrew. It already includes the
+graphics library the window needs, so there is nothing else to install
+afterwards.
+
+---
+
+### Step 2 — open the terminal, and check Python arrived
+
+**Windows:** press the **Windows key**, type `powershell`, press **Enter**.
+
+**macOS:** press **Command + Space**, type `terminal`, press **Return**.
+
+A window opens with a blinking cursor. Type this and press Enter:
+
 ```bash
-brew install python-tk portaudio
-git clone https://github.com/abhisheks5473/JARVIS.git
-cd JARVIS
+python --version
+```
+
+On a Mac, type `python3 --version` instead.
+
+You should see something like `Python 3.13.1`. Any number **3.11 or higher** is
+fine.
+
+If you instead see *"not recognized"* or *"command not found"*, Python is not
+installed or the PATH box in Step 1 was missed. Reinstall, and tick the box.
+
+---
+
+### Step 3 — download JARVIS
+
+1. Go to **github.com/abhisheks5473/JARVIS**
+2. Click the green **Code** button
+3. Click **Download ZIP**
+4. Find `JARVIS-main.zip` in your Downloads folder
+
+Now unzip it:
+
+- **Windows:** right-click the file → **Extract All** → **Extract**
+- **macOS:** double-click the file
+
+5. Move the resulting **JARVIS-main** folder to your **Desktop**, so it is easy
+   to find
+
+---
+
+### Step 4 — point the terminal at that folder
+
+The terminal is always "in" some folder. It needs to be in the JARVIS one.
+
+**Windows:** open the JARVIS-main folder, click once on the **address bar** at
+the top (where the folder path is), type `powershell`, and press **Enter**. A
+terminal opens already in that folder.
+
+**macOS:** in the terminal, type `cd` followed by a **space**, then drag the
+JARVIS-main folder from Finder into the terminal window — it fills in the path
+for you. Press **Return**.
+
+Check you are in the right place:
+
+```bash
+dir
+```
+
+On a Mac, type `ls` instead. Either way you should see **app.py**,
+**requirements.txt** and a folder called **jarvis** in the list. If you do not,
+you are in the wrong folder — do this step again.
+
+---
+
+### Step 5 — make a private space for the parts
+
+This creates a folder called `.venv` holding JARVIS's own copy of Python, so
+nothing it installs can interfere with anything else on your laptop.
+
+**Windows:**
+
+```bash
+python -m venv .venv
+```
+
+**macOS:**
+
+```bash
 python3 -m venv .venv
+```
+
+It takes a few seconds and says nothing when it works.
+
+---
+
+### Step 6 — install the parts JARVIS needs
+
+**Windows:**
+
+```bash
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+**macOS:**
+
+```bash
 .venv/bin/python -m pip install -r requirements.txt
+```
+
+**This one takes a while** — around 500 MB and several minutes on a normal
+connection. Text will scroll past continuously; that is it working, not
+breaking. Most of the size is the offline speech engine, which is why your
+voice never leaves your laptop.
+
+Wait until you get the prompt back before typing anything else.
+
+---
+
+### Step 7 — start it
+
+**Windows:**
+
+```bash
+.venv\Scripts\python.exe app.py
+```
+
+**macOS:**
+
+```bash
 .venv/bin/python app.py
 ```
 
-`python-tk` because the window is Tk and Homebrew's Python ships without it;
-`portaudio` because that is what the microphone goes through. Everything
-Windows-only is skipped automatically at install time, so nothing to edit.
+The JARVIS window opens.
 
-Then grant three permissions in **System Settings → Privacy & Security**, or
-the parts that need them fail quietly rather than loudly:
+---
+
+### Step 8 — give it a key
+
+On first launch it asks for an API key and opens the page for you. A key is
+how Google knows the requests are yours; the free tier needs no card.
+
+1. The browser opens **Google AI Studio**. Sign in with your Google account
+2. Click **Create API key**
+3. Click **Copy**
+4. Paste it into the JARVIS box and press **Save**
+
+That is it — JARVIS is running.
+
+You can change this later at any time: the **Key** button next to Talk, or
+typing `/key`, opens the same panel and also lets you switch to a different
+provider entirely.
+
+---
+
+### Step 9 (macOS only) — the permissions
+
+macOS will not let any app use your microphone, keyboard or screen until you
+say so. Skip this and JARVIS still runs and talks, but the mouse tools do
+nothing and the microphone hears silence — **with no error message**.
+
+Open **System Settings → Privacy & Security**, and add **Terminal** to each of
+these three:
 
 | permission | needed for |
 |---|---|
 | **Microphone** | speech input and the wake word |
-| **Accessibility** | the mouse, the keyboard and the global hotkeys |
+| **Accessibility** | the mouse, the keyboard, the shortcuts |
 | **Screen Recording** | `see_screen`, so it can look before it clicks |
 
-Add your terminal (or the app, once you make one) to each list. macOS grants
-these per-application, and a denied one shows up as a tool that does nothing
-rather than an error. **Step 8** of the launcher walkthrough below says
-exactly where to click, if you have not done this before.
+It is **Terminal** you tick, not Python and not JARVIS — macOS gives
+permissions to whatever launched the program. Step 8 of the launcher
+walkthrough below shows exactly where to click.
 
-No git? Use the green **Code** button, **Download ZIP**, extract, and `cd` in.
+---
 
-**The first launch asks for your API key and shows you where to get one.** It
-opens Google AI Studio for you and writes `.env` itself. You never create it by
-hand.
+### If something goes wrong during install
 
-Then make it double-clickable, so you never touch a terminal again:
+| What you see | What it means |
+|---|---|
+| `python is not recognized` / `command not found: python` | Python is not installed, or the **Add to PATH** box in Step 1 was missed. Reinstall and tick it. On a Mac try `python3` |
+| `No such file or directory: requirements.txt` | The terminal is in the wrong folder. Redo Step 4 and check with `dir` / `ls` |
+| The install in Step 6 stops with a red error | Usually the connection dropped. Run the same command again; it picks up where it left off |
+| `pip is not recognized` | Use the full command exactly as written above — it starts with `.venv\Scripts\` or `.venv/bin/`, not plain `pip` |
+| The window never appears | Run `.venv\Scripts\python.exe -m jarvis.doctor` (Mac: `.venv/bin/python -m jarvis.doctor`). It checks everything and says what is missing |
+| `No module named _tkinter` (Mac) | You are using Homebrew's Python, which ships without the graphics library. Either use the python.org installer from Step 1, or run `brew install python-tk` |
+| `PortAudio` errors on a Mac | Rare, and only with a Homebrew Python: `brew install portaudio`, then redo Step 6 |
+| Something else | Open an issue on the GitHub page with what you typed and what came back |
+
+---
+
+## Making it double-clickable
+
+Once installed, you should not have to open a terminal again. This is separate
+from the install above, and its steps start over at 1.
 
 On **Windows**:
 
@@ -191,7 +367,7 @@ If you skip this step nothing warns you. JARVIS opens and talks normally, but
 the mouse tools do nothing, `see_screen` gives back a black picture, and the
 microphone hears silence — all without a single error message.
 
-### If something goes wrong
+### If the launcher does not work
 
 | What you see | What it means |
 |---|---|
