@@ -261,10 +261,33 @@ def main() -> int:
             load_dotenv(_config.ENV_FILE, override=True)
             importlib.reload(_config)
 
+        from jarvis.app.single import claim
         from jarvis.app.tray import Tray
         from jarvis.app.window import JarvisWindow
 
+        # One copy at a time. A second launch hands the request to the copy
+        # already running and stops here, rather than starting a rival with
+        # its own wake-word listener on the same microphone.
+        pending_show = []
+        lock = claim(on_show=lambda: pending_show.append(True))
+        if lock is None:
+            return 0
+
         window = JarvisWindow()
+        window.single_lock = lock
+
+        # The socket thread cannot touch Tk, so it leaves a note and the UI
+        # thread picks it up.
+        def _watch_for_second_launch() -> None:
+            if pending_show:
+                pending_show.clear()
+                try:
+                    window.show_window()
+                except Exception:  # noqa: BLE001
+                    pass
+            window.after(400, _watch_for_second_launch)
+
+        window.after(400, _watch_for_second_launch)
 
         tray = Tray(window)
         if tray.start():

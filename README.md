@@ -499,6 +499,14 @@ On Windows, closing the window hides it to the system tray: the assistant keeps
 running, scheduled jobs keep firing, and push-to-talk still works from any
 application. Quit properly from the tray menu or with `ctrl+alt+q`.
 
+**Only one copy runs at a time.** Launching it again brings the running one to
+the front instead of starting a rival. That matters more than it sounds:
+without it, double-clicking the shortcut while a copy sat in the tray started
+another, and every copy ran its own wake-word listener on the same microphone.
+Saying the wake word then woke whichever heard it first — a different window
+from the one in front of you, which looks exactly like the app opening a new
+window, and made the wake word erratic besides.
+
 There is **no tray icon on macOS**, so closing the window quits, and the app
 says so on startup. pystray's macOS backend drives AppKit, which must own the
 main thread — and the window already has it. Running it on a second thread
