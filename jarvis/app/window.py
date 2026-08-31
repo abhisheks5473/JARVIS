@@ -44,6 +44,10 @@ ACCENT = "#58a6ff"
 GOOD = "#3fb950"
 WARN = "#d29922"
 ALARM = "#f85149"
+# The stage sits a shade below the window, so the core reads as lit
+# rather than merely drawn, and the readouts stay quiet.
+STAGE = "#0a0e16"
+DIM = "#4a6a8a"
 
 _MODE_COLOUR = {
     Mode.NORMAL: GOOD,
@@ -188,15 +192,46 @@ class JarvisWindow(ctk.CTk):
             relief="flat", padx=20, pady=16, spacing1=2, spacing3=6,
             font=("Segoe UI", 11), state="disabled", highlightthickness=0,
         )
-        # The core sits above the transcript, where the eye goes first.
-        orb_row = ctk.CTkFrame(self, fg_color=BG, height=190)
-        orb_row.grid(row=2, column=0, columnspan=2, sticky="ew")
-        orb_row.grid_propagate(False)
+        # The stage: the core in the middle, live readouts down either side.
+        # The readouts are real -- provider, model, quota, wake word, security
+        # -- because a panel of decorative fake telemetry is a lie about what
+        # the machine is doing, and this app spends the rest of its time
+        # refusing to do that.
+        stage = ctk.CTkFrame(self, fg_color=STAGE, height=250, corner_radius=0)
+        stage.grid(row=2, column=0, columnspan=2, sticky="ew")
+        stage.grid_propagate(False)
+        # Weighted spacers on the outside, fixed content in the middle. With
+        # the readouts in stretchy columns they were flung to the window edges
+        # on a wide screen, a foot away from the thing they describe.
+        stage.grid_columnconfigure(0, weight=1)
+        stage.grid_columnconfigure(4, weight=1)
+        for fixed in (1, 2, 3):
+            stage.grid_columnconfigure(fixed, weight=0)
+
+        readout = ("Consolas", 10)
+        left = ctk.CTkFrame(stage, fg_color="transparent", width=250)
+        left.grid(row=0, column=1, sticky="e", padx=(0, 26), pady=30)
+        left.grid_propagate(False)
+        right = ctk.CTkFrame(stage, fg_color="transparent", width=250)
+        right.grid(row=0, column=3, sticky="w", padx=(26, 0), pady=30)
+        right.grid_propagate(False)
+
+        self.readouts = {}
+        for side, keys, anchor in ((left, ("wake", "stt", "jobs"), "e"),
+                                   (right, ("model", "tts", "quota"), "w")):
+            for name in keys:
+                label = ctk.CTkLabel(
+                    side, text="", font=ctk.CTkFont(family=readout[0], size=readout[1]),
+                    text_color=DIM, anchor=anchor, justify="left",
+                )
+                label.pack(anchor=anchor, pady=5)
+                self.readouts[name] = label
+
         try:
             from .orb import Orb
 
-            self.orb = Orb(orb_row, size=170, background=BG)
-            self.orb.pack(pady=10)
+            self.orb = Orb(stage, size=200, background=STAGE)
+            self.orb.grid(row=0, column=2, pady=22)
             self.after(120, self._pulse)
         except Exception as exc:  # noqa: BLE001 - a missing orb is cosmetic
             self.orb = None
@@ -226,39 +261,44 @@ class JarvisWindow(ctk.CTk):
         bar.grid_columnconfigure(0, weight=1)
 
         self.entry = ctk.CTkEntry(
-            bar, placeholder_text="Ask me something...", height=44,
-            fg_color=FIELD, border_color=LINE, text_color=TEXT,
-            font=ctk.CTkFont(size=13),
+            bar, placeholder_text="Ask me something...", height=46,
+            corner_radius=23, fg_color=FIELD, border_color=LINE,
+            border_width=1, text_color=TEXT, font=ctk.CTkFont(size=13),
         )
-        self.entry.grid(row=0, column=0, sticky="ew", padx=(16, 8), pady=12)
+        self.entry.grid(row=0, column=0, sticky="ew", padx=(18, 10), pady=14)
         self.entry.bind("<Return>", lambda _e: self._submit())
 
         # Always present, never conditional: changing provider or key is
         # something you may need at any moment, including when nothing works.
         self.provider_button = ctk.CTkButton(
-            bar, text="Key", width=56, height=44, fg_color=FIELD,
-            hover_color=LINE, text_color=MUTED, command=self.open_provider,
+            bar, text="Key", width=58, height=46, corner_radius=23,
+            fg_color=FIELD, hover_color=LINE, text_color=MUTED,
+            font=ctk.CTkFont(size=12), command=self.open_provider,
         )
-        self.provider_button.grid(row=0, column=1, pady=12)
+        self.provider_button.grid(row=0, column=1, pady=14)
 
         self.mic_button = ctk.CTkButton(
-            bar, text="Talk", width=76, height=44, fg_color=FIELD,
-            hover_color=LINE, text_color=TEXT, command=self.bridge.listen,
+            bar, text="Talk", width=78, height=46, corner_radius=23,
+            fg_color=FIELD, hover_color=LINE, text_color=TEXT,
+            font=ctk.CTkFont(size=12), command=self.bridge.listen,
         )
-        self.mic_button.grid(row=0, column=2, pady=12)
+        self.mic_button.grid(row=0, column=2, padx=8, pady=14)
 
         self.send_button = ctk.CTkButton(
-            bar, text="Send", width=76, height=44, fg_color=ACCENT,
-            hover_color="#1f6feb", command=self._submit,
+            bar, text="Send", width=82, height=46, corner_radius=23,
+            fg_color=ACCENT, hover_color="#1f6feb", text_color="#04121f",
+            font=ctk.CTkFont(size=12, weight="bold"), command=self._submit,
         )
-        self.send_button.grid(row=0, column=3, padx=(8, 16), pady=12)
+        self.send_button.grid(row=0, column=3, padx=(0, 18), pady=14)
 
         self.status = ctk.CTkLabel(
             self, text="starting...", text_color=MUTED, anchor="w",
             font=ctk.CTkFont(size=11),
         )
+        # Row 5. It shared row 4 with the input bar for one commit, which
+        # stacked a label on top of three buttons and made them look clipped.
         self.status.grid(
-            row=4, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 8)
+            row=5, column=0, columnspan=2, sticky="ew", padx=18, pady=(0, 8)
         )
 
     # ------------------------------------------------------------ writing
@@ -647,9 +687,49 @@ class JarvisWindow(ctk.CTk):
                 )
             else:
                 self.security_label.configure(text="secure", text_color=GOOD)
+            self._tick_readouts(snap)
         except Exception:  # noqa: BLE001
             pass
         self.after(2000, self._tick_status)
+
+    def _tick_readouts(self, snap) -> None:
+        """Keep the readouts around the core honest.
+
+        Every line is read from the thing it names. A decorative panel of
+        plausible-looking telemetry would be easier and would be a lie about
+        what the machine is doing, which is the one thing this app spends the
+        rest of its time refusing to do.
+        """
+        if not getattr(self, "readouts", None):
+            return
+
+        from ..voice.stt import ears
+        from ..voice.tts import speaker
+        from ..voice.wakeword import wake
+
+        if wake.listening:
+            phrase = wake.phrase or "wake word"
+            woken = f'wake_word = listening "{phrase}"'
+        elif wake.trained:
+            woken = "wake_word = recorded, off"
+        else:
+            woken = "wake_word = not recorded"
+
+        provider = providers.active()
+        values = {
+            "wake": woken,
+            "stt": f"stt: whisper {config.VOICE.stt_model}"
+                   + (" · live" if ears.is_listening else ""),
+            "jobs": f"jobs: {len(self.nerves.jobs()) if self.nerves else 0} running",
+            "model": f"model = {config.Models.FAST.id}",
+            "tts": f"tts: {config.VOICE.piper_voice}"
+                   + (" · speaking" if speaker.is_speaking else ""),
+            "quota": f"quota = {snap.rpd_used}/{snap.rpd_limit} · {provider.key}",
+        }
+        for name, text in values.items():
+            label = self.readouts.get(name)
+            if label is not None:
+                label.configure(text=text)
 
     # ------------------------------------------------------------ tray
     def attach_tray(self, tray) -> None:
