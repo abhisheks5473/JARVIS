@@ -354,6 +354,44 @@ class JarvisWindow(ctk.CTk):
             self._write(f"Hotkeys unavailable: {type(exc).__name__}", "warn")
             self._bind_local_keys()
 
+    def _wake_scores(self) -> None:
+        """Show what the wake word has actually been scoring.
+
+        "It is inaccurate" cannot be acted on; a list of scores against the
+        threshold can. Anything under the threshold woke it, and the gap
+        between the two columns is the whole tuning problem.
+        """
+        from ..voice.wakeword import wake
+
+        if not wake.trained and not wake.load():
+            self._write(f"No wake word recorded. {wake.last_error}", "warn")
+            return
+
+        self._write(
+            f'Wake word "{wake.phrase or "?"}" - threshold {wake.threshold:.4f}, '
+            f"expects {wake.spread[0]:.2f}-{wake.spread[1]:.2f}s of speech.",
+            "muted",
+        )
+        if not wake.recent:
+            self._write(
+                "  Nothing heard yet. Say a few things -- the wake word and "
+                "some other sentences -- then run /wake test again.", "muted",
+            )
+            return
+
+        self._write("  heard            length   score     woke", "muted")
+        for row in wake.recent[-10:]:
+            score = "over" if row["score"] is None else f"{row['score']:.4f}"
+            self._write(
+                f"  {'utterance':<15}  {row['seconds']:>5.2f}s  {score:>7}   "
+                f"{'YES' if row['woke'] else 'no'}",
+                "tool",
+            )
+        self._write(
+            "  Waking on things that are not the phrase: lower "
+            "JARVIS_WAKE_SENSITIVITY. Missing it: raise it. 0 to 1.", "muted",
+        )
+
     def open_provider(self) -> None:
         """Open the provider and key panel. Available for the whole session."""
         try:
@@ -539,7 +577,9 @@ class JarvisWindow(ctk.CTk):
         elif name == "wake":
             parts = raw[1:].split(None, 1)
             argument = parts[1].strip() if len(parts) > 1 else ""
-            if argument.lower() in ("off", "stop", "forget"):
+            if argument.lower() in ("test", "scores", "status"):
+                self._wake_scores()
+            elif argument.lower() in ("off", "stop", "forget"):
                 from ..voice.wakeword import wake
 
                 wake.stop()

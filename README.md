@@ -527,9 +527,24 @@ dynamic time warping in a few milliseconds of numpy — no model download, no
 network call — and the recordings themselves are discarded. Only the features
 are kept, in `data/voice/wakeword.npz`.
 
-If it misfires, `JARVIS_WAKE_SENSITIVITY` runs from 0 (strict) to 1 (eager).
-Re-recording usually helps more: say the phrase the way you actually say it,
-not the way you think you should. `/wake off` forgets it.
+**If it is inaccurate, measure it before tuning it.** `/wake test` lists the
+last ten things it heard, what each scored, and the threshold they were
+compared against. Anything under the threshold woke it, and the gap between
+those two columns is the entire problem:
+
+```
+Wake word "jarvis" - threshold 0.1995, expects 0.72-0.95s of speech.
+  heard            length   score     woke
+  utterance         0.81s   0.1204    YES
+  utterance         1.90s      over   no
+  utterance         0.88s   0.3350    no
+```
+
+Waking on things that are not the phrase means the threshold is too high:
+lower `JARVIS_WAKE_SENSITIVITY` (0 is strict, 1 is eager, 0.5 default).
+Missing the phrase when you say it means the opposite. Re-recording often
+helps more than either: say it the way you actually say it, five times, with
+the variation you would really use. `/wake off` forgets it.
 
 ### The core
 

@@ -49,6 +49,14 @@ MAX_PHRASE_S = 3.0
 
 REQUIRED_SAMPLES = 5
 
+# How much the velocity half counts against the static half.
+DELTA_WEIGHT = 0.7
+
+# Templates from before the delta features are a different width and
+# cannot be compared with new ones. Bumping this asks for a re-record
+# rather than silently scoring nonsense.
+TEMPLATE_VERSION = 2
+
 _CACHE: dict = {}
 
 
@@ -134,8 +142,18 @@ def features(audio, rate: int | None = None):
     cepstra = cepstra - cepstra.mean(axis=0, keepdims=True)
     cepstra = cepstra / np.maximum(cepstra.std(axis=0, keepdims=True), 1e-8)
 
-    norms = np.linalg.norm(cepstra, axis=1, keepdims=True)
-    return cepstra / np.maximum(norms, 1e-8)
+    # Deltas: how the sound is *changing*, not only how it sits. Static
+    # cepstra describe vowel colour, and plenty of unrelated speech has
+    # similar colour -- which is most of why any sentence of roughly the right
+    # length used to score close. The velocity of the change is far more
+    # specific to a particular phrase, and doubling the vector is cheap next
+    # to the alignment that follows.
+    delta = np.diff(cepstra, axis=0, prepend=cepstra[:1])
+    delta = delta / max(float(np.abs(delta).std()), 1e-8)
+    combined = np.hstack([cepstra, delta * DELTA_WEIGHT])
+
+    norms = np.linalg.norm(combined, axis=1, keepdims=True)
+    return combined / np.maximum(norms, 1e-8)
 
 
 def trim_silence(audio, rate: int | None = None, pad_ms: int = 60):
@@ -208,6 +226,10 @@ class WakeWord:
         self.spread = (0.0, 0.0)
         self.last_error = ""
         self.last_score: float | None = None
+        # The last handful of candidate utterances and what they scored.
+        # Without this, "it is inaccurate" cannot be turned into a number, and
+        # tuning is guesswork.
+        self.recent: list[dict] = []
         self.listening = False
         # Room loudness while armed, so the orb breathes with
         # the room even when nothing is being said to it.
@@ -228,6 +250,17 @@ class WakeWord:
             return False
         try:
             data = np.load(TEMPLATE_FILE, allow_pickle=False)
+            version = int(data["version"]) if "version" in data else 1
+            if version != TEMPLATE_VERSION:
+                # Recorded before the velocity features existed, so they are a
+                # different width and cannot be compared. Silently scoring
+                # them against new ones would be worse than saying so.
+                self.last_error = (
+                    "your wake word was recorded by an older version and has "
+                    "to be recorded again -- run /wake <phrase>"
+                )
+                self.templates = []
+                return False
             self.templates = [data[f"t{i}"] for i in range(int(data["count"]))]
             self.threshold = float(data["threshold"])
             self.phrase = str(data["phrase"])
@@ -244,6 +277,7 @@ class WakeWord:
         TEMPLATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(
             TEMPLATE_FILE,
+            version=TEMPLATE_VERSION,
             count=len(self.templates),
             threshold=self.threshold,
             phrase=self.phrase,
@@ -294,19 +328,36 @@ class WakeWord:
 
         # How much the speaker varies between their own repetitions is the
         # natural scale for "close enough".
-        pairs = [
-            dtw_distance(templates[i], templates[j])
-            for i in range(len(templates))
-            for j in range(i + 1, len(templates))
-        ]
-        pairs = [p for p in pairs if np.isfinite(p)]
-        if not pairs:
+        # Calibrate on exactly the number that will be compared later.
+        #
+        # This used to average every pairwise distance between templates,
+        # while matching scored an utterance by its three *closest* templates.
+        # Two different statistics: the threshold did not describe the
+        # quantity it was gating, so it was miscalibrated in a direction
+        # nobody could predict. Holding each recording out and scoring it
+        # against the others uses the identical function, so the threshold is
+        # in the same units as the thing it is compared against.
+        held_out = []
+        for index in range(len(templates)):
+            others = templates[:index] + templates[index + 1:]
+            distances = sorted(
+                d for d in (dtw_distance(templates[index], t) for t in others)
+                if np.isfinite(d)
+            )
+            if distances:
+                held_out.append(float(np.mean(distances[: min(3, len(distances))])))
+
+        if not held_out:
             return {"ok": False, "message": "the recordings could not be compared"}
 
-        mean, deviation = float(np.mean(pairs)), float(np.std(pairs))
+        # The worst a genuine repetition scored, plus room for one that is a
+        # little worse than any recorded. Mean and deviation would sit below
+        # half the real examples and reject them.
+        mean = float(np.mean(held_out))
         sensitivity = float(config.VOICE.wake_sensitivity)
-        base = min(mean + 1.2 * deviation, max(pairs) * 1.15)
-        self.threshold = float(base * (0.75 + 0.5 * sensitivity))
+        base = max(held_out) * 1.18
+        self.threshold = float(base * (0.80 + 0.40 * sensitivity))
+        pairs = held_out
         self.templates = templates
         self.phrase = phrase.strip()
         self.spread = (min(durations), max(durations))
@@ -318,6 +369,7 @@ class WakeWord:
             "problems": rejected,
             "threshold": round(self.threshold, 4),
             "agreement": round(mean, 4),
+            "worst_example": round(max(held_out), 4),
             "consistent": mean < self.threshold,
             "message": (
                 f"learned from {len(templates)} recordings"
@@ -384,7 +436,11 @@ class WakeWord:
         # alignment happens: it is faster, and it stops DTW stretching
         # something unrelated into a shape that scores well.
         low, high = self.spread
-        if seconds < low * 0.5 or seconds > high * 2.0:
+        # Was 0.5x to 2.0x, which let a two-second sentence be judged against
+        # a one-second phrase. Nobody says their own wake word at half or
+        # double speed, and every candidate let through here is another chance
+        # to be wrong.
+        if seconds < low * 0.65 or seconds > high * 1.6:
             return float("inf")
 
         mfcc = features(trimmed, rate)
@@ -400,8 +456,21 @@ class WakeWord:
         return float(np.mean(usable[: min(3, len(usable))]))
 
     def matches(self, audio) -> bool:
+        import numpy as np
+
+        rate = config.VOICE.sample_rate
         self.last_score = self.score(audio)
-        return self.last_score <= self.threshold
+        hit = self.last_score <= self.threshold
+
+        self.recent.append({
+            "at": time.time(),
+            "score": None if not np.isfinite(self.last_score) else round(self.last_score, 4),
+            "threshold": round(self.threshold, 4),
+            "seconds": round(len(trim_silence(audio, rate)) / rate, 2),
+            "woke": hit,
+        })
+        del self.recent[:-12]
+        return hit
 
     # ------------------------------------------------------------- listening
     def start(self, on_wake, is_busy=None) -> bool:
