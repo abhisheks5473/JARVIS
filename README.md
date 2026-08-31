@@ -437,6 +437,7 @@ honest as those numbers.
 | **Memory** | Facts you tell it, plus every past conversation — searchable, and recalled automatically across sessions |
 | **Background** | Morning briefing, downloads watch, call watcher, dated trash purge |
 | **Voice** | Local speech in and out, push-to-talk, and a wake word in your own voice |
+| **The core** | A glowing orb that pulses to the actual audio — green as you speak, blue as it answers |
 
 63 tools in total. It is never offered all of them at once — see below.
 
@@ -529,6 +530,31 @@ are kept, in `data/voice/wakeword.npz`.
 If it misfires, `JARVIS_WAKE_SENSITIVITY` runs from 0 (strict) to 1 (eager).
 Re-recording usually helps more: say the phrase the way you actually say it,
 not the way you think you should. `/wake off` forgets it.
+
+### The core
+
+The orb above the transcript moves with the **real audio**, not a timer. Both
+the microphone loop and the speech synthesiser already measured loudness for
+their own purposes, so both now publish it and the window reads it thirty times
+a second.
+
+| colour | meaning |
+|---|---|
+| dim blue, breathing | idle — and it stirs with the room while the wake word is armed |
+| green | listening: your voice going in |
+| blue | speaking: its voice coming out |
+| amber | thinking |
+
+It rises fast and falls slowly, because following the audio exactly reads as a
+flicker: speech is full of gaps a few milliseconds long that the ear ignores
+and the eye does not.
+
+Making it move properly needed a fix underneath. Piper hands back a whole
+sentence of audio at a time, and writing that to the speaker in one call blocks
+for its entire duration — the level changed about three times a sentence, so
+the orb sat still while it talked. Playback now writes in 30ms blocks: 54
+distinct levels across one sentence instead of 3, and stopping it mid-sentence
+became responsive as well, rather than waiting for the sentence to finish.
 
 ### Provider and API key
 

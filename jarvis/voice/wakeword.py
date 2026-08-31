@@ -209,6 +209,9 @@ class WakeWord:
         self.last_error = ""
         self.last_score: float | None = None
         self.listening = False
+        # Room loudness while armed, so the orb breathes with
+        # the room even when nothing is being said to it.
+        self.level = 0.0
         self._thread = None
         self._stop = threading.Event()
         self._paused = threading.Event()
@@ -451,6 +454,7 @@ class WakeWord:
                 while not self._stop.is_set():
                     chunk, _over = stream.read(block)
                     level = float(np.sqrt(np.mean(chunk**2)))
+                    self.level = level
 
                     if not calibrated:
                         floor, calibrated = max(level, 1e-4), True

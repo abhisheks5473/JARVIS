@@ -149,7 +149,7 @@ class JarvisWindow(ctk.CTk):
     # ------------------------------------------------------------ layout
     def _build(self) -> None:
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1)
+        self.grid_rowconfigure(3, weight=1)
 
         header = ctk.CTkFrame(self, fg_color=PANEL, corner_radius=0, height=54)
         header.grid(row=0, column=0, columnspan=2, sticky="ew")
@@ -188,10 +188,24 @@ class JarvisWindow(ctk.CTk):
             relief="flat", padx=20, pady=16, spacing1=2, spacing3=6,
             font=("Segoe UI", 11), state="disabled", highlightthickness=0,
         )
-        self.view.grid(row=2, column=0, sticky="nsew")
+        # The core sits above the transcript, where the eye goes first.
+        orb_row = ctk.CTkFrame(self, fg_color=BG, height=190)
+        orb_row.grid(row=2, column=0, columnspan=2, sticky="ew")
+        orb_row.grid_propagate(False)
+        try:
+            from .orb import Orb
+
+            self.orb = Orb(orb_row, size=170, background=BG)
+            self.orb.pack(pady=10)
+            self.after(120, self._pulse)
+        except Exception as exc:  # noqa: BLE001 - a missing orb is cosmetic
+            self.orb = None
+            print(f"orb unavailable: {exc}")
+
+        self.view.grid(row=3, column=0, sticky="nsew")
 
         scroll = ctk.CTkScrollbar(self, command=self.view.yview)
-        scroll.grid(row=2, column=1, sticky="ns")
+        scroll.grid(row=3, column=1, sticky="ns")
         self.view.configure(yscrollcommand=scroll.set)
 
         base = tkfont.Font(font=("Segoe UI", 11))
@@ -208,7 +222,7 @@ class JarvisWindow(ctk.CTk):
         self.view.tag_configure("muted", foreground=MUTED, font=mono)
 
         bar = ctk.CTkFrame(self, fg_color=PANEL, corner_radius=0)
-        bar.grid(row=3, column=0, columnspan=2, sticky="ew")
+        bar.grid(row=4, column=0, columnspan=2, sticky="ew")
         bar.grid_columnconfigure(0, weight=1)
 
         self.entry = ctk.CTkEntry(
@@ -504,6 +518,40 @@ class JarvisWindow(ctk.CTk):
         self.status.configure(text="thinking..." if busy else "ready")
 
     # ------------------------------------------------------------ events
+    def _pulse(self) -> None:
+        """Feed the orb whichever part of the voice stack is live.
+
+        Polled rather than pushed: the levels are written from the audio
+        threads, and Tk may only be touched from this one. Reading a float on a
+        timer is the cheapest safe way across that line -- a callback from the
+        audio thread would have to be marshalled anyway, thirty times a second.
+        """
+        if self.orb is None:
+            return
+        try:
+            from ..voice.stt import ears
+            from ..voice.tts import speaker
+            from ..voice.wakeword import wake
+
+            if speaker.is_speaking:
+                self.orb.set_state("speaking")
+                self.orb.set_level(speaker.level)
+            elif ears.is_listening:
+                self.orb.set_state("listening")
+                self.orb.set_level(ears.level * 6.0)
+            elif self.bridge.busy:
+                self.orb.set_state("thinking")
+                self.orb.set_level(0.28)
+            else:
+                self.orb.set_state("idle")
+                # While the wake word is armed the room itself is being
+                # measured, so the core stirs when someone speaks nearby --
+                # scaled well down, or a quiet room looks like shouting.
+                self.orb.set_level(wake.level * 3.0 if wake.listening else 0.0)
+        except Exception:  # noqa: BLE001 - never let decoration break the app
+            pass
+        self.after(60, self._pulse)
+
     def _pump(self) -> None:
         for event in self.bridge.drain():
             try:
@@ -629,6 +677,8 @@ class JarvisWindow(ctk.CTk):
                 self.nerves.stop()
             if self._tray is not None:
                 self._tray.stop()
+            if getattr(self, 'orb', None) is not None:
+                self.orb.stop()
             if getattr(self, 'wake', None) is not None:
                 self.wake.stop()
             self.bridge.shutdown()

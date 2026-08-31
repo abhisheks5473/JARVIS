@@ -46,6 +46,40 @@ def _clean_for_speech(text: str) -> str:
     return " ".join(cleaned.split())
 
 
+# 30ms of 16-bit mono at 22050Hz: small enough to track syllables,
+# large enough that the write call is not the bottleneck.
+_BLOCK_BYTES = 2 * int(22050 * 0.03)
+
+
+def _rms(pcm: bytes) -> float:
+    """Loudness of a block of 16-bit audio, 0..1.
+
+    Sampled rather than fully measured: a chunk is thousands of frames and the
+    orb is redrawn thirty times a second, so averaging every sample would cost
+    more than the drawing does. Every 64th frame is plenty to make a mouth
+    move convincingly.
+    """
+    if not pcm:
+        return 0.0
+    try:
+        import array
+
+        samples = array.array("h")
+        samples.frombytes(pcm[: len(pcm) - (len(pcm) % 2)])
+        if not samples:
+            return 0.0
+        step = max(1, len(samples) // 256)
+        picked = samples[::step]
+        total = sum(float(v) * v for v in picked)
+        # 13000 rather than the obvious 32768: speech RMS sits far below
+        # peak amplitude, and dividing by full scale left everything hugging
+        # the bottom. Chosen against actual Piper output so a normal sentence
+        # spans the range instead of pinning at 1.0.
+        return min(1.0, (total / len(picked)) ** 0.5 / 13000.0)
+    except Exception:  # noqa: BLE001 - a drawing hint is never worth an error
+        return 0.0
+
+
 class Speaker:
     """Piper voice with interruptible playback."""
 
@@ -56,6 +90,8 @@ class Speaker:
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self.is_speaking = False
+        # Loudness of the chunk currently playing, for the orb.
+        self.level = 0.0
         self.last_error = ""
 
     # ------------------------------------------------------------ loading
@@ -135,7 +171,23 @@ class Speaker:
                         if self._stop.is_set():
                             completed = False
                             break
-                        stream.write(chunk.audio_int16_bytes)
+                        # Piper hands back a whole sentence at a time. Writing
+                        # that in one go blocks for its entire duration, which
+                        # meant the level changed about three times a sentence
+                        # -- an orb that sat still while it talked. In 30ms
+                        # blocks it moves with the syllables, and stopping
+                        # mid-sentence becomes responsive rather than waiting
+                        # for the sentence to finish playing.
+                        data = chunk.audio_int16_bytes
+                        for start in range(0, len(data), _BLOCK_BYTES):
+                            if self._stop.is_set():
+                                completed = False
+                                break
+                            piece = data[start : start + _BLOCK_BYTES]
+                            self.level = _rms(piece)
+                            stream.write(piece)
+                        if not completed:
+                            break
                 finally:
                     stream.stop()
                     stream.close()
@@ -144,6 +196,7 @@ class Speaker:
                 completed = False
             finally:
                 self.is_speaking = False
+                self.level = 0.0
             return completed
 
     def speak_stream(self, chunks: Iterable[str]) -> str:

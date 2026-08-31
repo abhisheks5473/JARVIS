@@ -27,6 +27,10 @@ class Ears:
         self._stop = threading.Event()
         self.last_error = ""
         self.is_listening = False
+        # Loudness of the last block, 0..1ish. The window draws
+        # from this, so the orb reacts to the actual voice
+        # rather than to a timer pretending to be one.
+        self.level = 0.0
 
     # ------------------------------------------------------------ loading
     def load(self) -> bool:
@@ -132,6 +136,7 @@ class Ears:
 
                     collected.append(chunk.copy())
                     level = float(np.sqrt(np.mean(chunk**2)))
+                    self.level = level
 
                     if level > threshold:
                         heard_speech = True
@@ -148,6 +153,7 @@ class Ears:
             return None
         finally:
             self.is_listening = False
+            self.level = 0.0
 
         if not heard_speech or not collected:
             return None
