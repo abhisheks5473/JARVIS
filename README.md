@@ -258,11 +258,11 @@ honest as those numbers.
 | **Web** | Search and fetch, on scraped backends that cost no quota |
 | **Google** | Gmail, Drive, Calendar, Docs, Photos and the rest, driven in the browser you are signed into — including writing and sending mail. **Windows only** |
 | **Calendar and email (API)** | Read-only, at the OAuth scope level |
-| **Memory** | SQLite with full-text search; tell it something once |
+| **Memory** | Facts you tell it, plus every past conversation — searchable, and recalled automatically across sessions |
 | **Background** | Morning briefing, downloads watch, call watcher, dated trash purge |
 | **Voice** | Local speech in and out, push-to-talk, and a wake word in your own voice |
 
-62 tools in total. It is never offered all of them at once — see below.
+63 tools in total. It is never offered all of them at once — see below.
 
 ### What runs where
 
@@ -353,6 +353,38 @@ are kept, in `data/voice/wakeword.npz`.
 If it misfires, `JARVIS_WAKE_SENSITIVITY` runs from 0 (strict) to 1 (eager).
 Re-recording usually helps more: say the phrase the way you actually say it,
 not the way you think you should. `/wake off` forgets it.
+
+### Memory across sessions
+
+Two different things are remembered, and they work differently.
+
+**Facts** are things it was told and chose to keep — *"I use PowerShell, not
+bash"*. They are injected into every turn, so they are always in play.
+
+**Conversations** are summarised when a session ends and kept for good. When
+you say something, the past sessions that look relevant are searched and put
+into the prompt before the model answers. So a conversation from last week
+comes back on its own:
+
+```
+Monday:   "For the loft I went with oak rather than pine, because of
+           the underfloor heating."
+
+Next week: "why did I go with oak for the loft?"
+           -> "Because of the underfloor heating."   (no tool call)
+```
+
+That is retrieval, not a tool call. The model does not have to decide to go
+looking, which is what makes it feel like memory rather than a filing cabinet.
+`recall_conversations` exists for when it needs to search deliberately — *"what
+did we decide about the quote?"* — and `/memory` lists the facts.
+
+Sessions are checkpointed as they go, not only summarised at the end, so a
+crash leaves a rough record of what was said rather than nothing.
+
+The search is keyword-based, and it is worth knowing where that ends: asking
+who you were "travelling" with will not find a conversation that only ever
+said "trip". Ask with a word that was actually used and it finds it.
 
 ### Google services
 
@@ -651,7 +683,7 @@ jarvis/
 │   ├── taint.py       injection detection and the taint ledger
 │   ├── approval.py    four-layer gate, secret redaction
 │   └── trash.py       deletion you can take back
-├── tools/             62 tools, schemas generated from type hints
+├── tools/             63 tools, schemas generated from type hints
 ├── memory/            SQLite + FTS5
 ├── voice/             faster-whisper in, Piper out, wake word, push-to-talk
 ├── triggers/          scheduled and event-driven autonomy

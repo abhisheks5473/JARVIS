@@ -66,11 +66,40 @@ CREATE TABLE IF NOT EXISTS episodes (
     turns      INTEGER DEFAULT 0,
     created_on TEXT NOT NULL
 );
+
+CREATE VIRTUAL TABLE IF NOT EXISTS episodes_fts
+USING fts5(summary, content=episodes, content_rowid=id);
+
+CREATE TRIGGER IF NOT EXISTS episodes_ai AFTER INSERT ON episodes BEGIN
+    INSERT INTO episodes_fts(rowid, summary) VALUES (new.id, new.summary);
+END;
+CREATE TRIGGER IF NOT EXISTS episodes_ad AFTER DELETE ON episodes BEGIN
+    INSERT INTO episodes_fts(episodes_fts, rowid, summary)
+    VALUES ('delete', old.id, old.summary);
+END;
+CREATE TRIGGER IF NOT EXISTS episodes_au AFTER UPDATE ON episodes BEGIN
+    INSERT INTO episodes_fts(episodes_fts, rowid, summary)
+    VALUES ('delete', old.id, old.summary);
+    INSERT INTO episodes_fts(rowid, summary) VALUES (new.id, new.summary);
+END;
 """
 
 # FTS5 treats these as syntax. Someone asking to remember "C++ (the language)"
 # should not produce a query parse error.
 _FTS_SPECIAL = re.compile(r'["*():^\-]')
+
+# Words that appear in nearly every conversation. Left in, they match
+# everything and the ranking becomes meaningless.
+_STOPWORDS = {
+    "the", "and", "for", "was", "were", "you", "your", "yours", "our", "ours",
+    "that", "this", "these", "those", "with", "what", "when", "where", "which",
+    "who", "whom", "how", "why", "did", "does", "done", "have", "has", "had",
+    "are", "not", "but", "can", "could", "would", "should", "about", "into",
+    "from", "they", "them", "their", "there", "here", "just", "then", "than",
+    "some", "any", "all", "again", "back", "also", "said", "say", "says",
+    "tell", "told", "ask", "asked", "please", "thanks", "okay", "yes", "sir",
+    "jarvis", "conversation", "talked", "talking", "discussed", "remember",
+}
 
 
 @dataclass
@@ -93,7 +122,35 @@ class MemoryStore:
         )
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """One-off work that a CREATE TABLE IF NOT EXISTS cannot express.
+
+        Episodes recorded before the search index existed are invisible to it
+        until the index is rebuilt -- and those are the oldest conversations,
+        the ones most worth being able to recall.
+
+        The obvious check for "is the index empty" does not work here. On an
+        FTS5 table with `content=`, COUNT(*) reads through to the content
+        table, so it reports the number of episodes and never zero. That
+        silently skipped the backfill, and search returned nothing for words
+        plainly present in the text. A marker row is used instead, and the
+        index is rebuilt through FTS5's own 'rebuild' command.
+        """
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        done = self._conn.execute(
+            "SELECT value FROM meta WHERE key='episodes_fts_built'"
+        ).fetchone()
+        if done:
+            return
+        self._conn.execute("INSERT INTO episodes_fts(episodes_fts) VALUES('rebuild')")
+        self._conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('episodes_fts_built','1')"
+        )
 
     # ------------------------------------------------------------ write
     def remember(
@@ -208,7 +265,30 @@ class MemoryStore:
             return int(self._conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0])
 
     # ------------------------------------------------------------ episodes
-    def save_episode(self, summary: str, started_at: float, turns: int) -> int:
+    def save_episode(
+        self,
+        summary: str,
+        started_at: float,
+        turns: int,
+        episode_id: int | None = None,
+    ) -> int:
+        """Write a conversation summary, replacing an earlier draft of it.
+
+        Passing back the id returned last time updates that row instead of
+        adding another. Sessions are checkpointed as they go, so a crash
+        leaves a rough record rather than nothing at all, and the tidy summary
+        written at the end replaces it rather than duplicating it.
+        """
+        if episode_id:
+            with self._lock:
+                self._conn.execute(
+                    "UPDATE episodes SET summary=?, ended_at=?, turns=?"
+                    " WHERE id=?",
+                    (summary, time.time(), turns, episode_id),
+                )
+                self._conn.commit()
+            return episode_id
+
         with self._lock:
             cursor = self._conn.execute(
                 "INSERT INTO episodes (summary, started_at, ended_at, turns,"
@@ -223,6 +303,53 @@ class MemoryStore:
             )
             self._conn.commit()
             return int(cursor.lastrowid or 0)
+
+    def search_episodes(self, query: str, limit: int = 4) -> list[dict]:
+        """Past conversations matching a query, newest first among matches.
+
+        Returns the summary with how long ago it happened, because "we talked
+        about this on Tuesday" is the useful form and a raw timestamp is not.
+        """
+        # FTS5 ANDs bare terms, so passing a whole question in means every
+        # word of it must appear -- "what is my cat called" matched nothing at
+        # all, while "cat" matched immediately. People ask questions, so the
+        # words are ORed and the ranking decides, and the noise words that
+        # would match every conversation ever held are dropped first.
+        cleaned = _FTS_SPECIAL.sub(" ", query or "").lower()
+        words = [
+            w for w in re.findall(r"[a-z0-9']{3,}", cleaned)
+            if w not in _STOPWORDS
+        ]
+        if not words:
+            return []
+        cleaned = " OR ".join(words[:12])
+        try:
+            with self._lock:
+                rows = self._conn.execute(
+                    "SELECT e.id, e.summary, e.created_on, e.turns, e.ended_at"
+                    " FROM episodes_fts JOIN episodes e"
+                    " ON e.id = episodes_fts.rowid"
+                    " WHERE episodes_fts MATCH ?"
+                    " ORDER BY bm25(episodes_fts) LIMIT ?",
+                    (cleaned, limit),
+                ).fetchall()
+        except sqlite3.OperationalError:
+            return []          # a query FTS cannot parse is not an error here
+
+        out = []
+        for row in rows:
+            days = max(0, int((time.time() - row["ended_at"]) // 86400))
+            out.append({
+                "id": row["id"],
+                "summary": row["summary"],
+                "on": row["created_on"],
+                "turns": row["turns"],
+                "days_ago": days,
+                "when": "today" if days == 0
+                        else "yesterday" if days == 1
+                        else f"{days} days ago",
+            })
+        return out
 
     def recent_episodes(self, limit: int = 5) -> list[dict]:
         with self._lock:

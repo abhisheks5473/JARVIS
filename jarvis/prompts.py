@@ -113,6 +113,7 @@ def build_system(
     taint_warning: str = "",
     quota_note: str = "",
     extra: str = "",
+    recalled: list[dict] | None = None,
 ) -> str:
     """Compose the system instruction for this turn.
 
@@ -124,6 +125,10 @@ def build_system(
         quota_note: Filled in when running low, so replies get shorter instead
             of the agent simply dying later.
         extra: Per-mode additions, e.g. for an unattended scheduled run.
+        recalled: Summaries of earlier conversations matching what the
+            user just said. Injected rather than searched for, so
+            continuity across sessions does not depend on the model
+            deciding to go looking for it.
     """
     name = INTEGRATIONS.assistant_name
     user = INTEGRATIONS.user_name
@@ -147,6 +152,22 @@ def build_system(
             f"WHAT YOU KNOW ABOUT {user.upper()}\n"
             "These are things you have been told and should treat as true "
             "unless corrected. Do not recite them unprompted.\n" + remembered
+        )
+
+    if recalled:
+        earlier = "\n\n".join(
+            f"- {e['when']} ({e['on']}), {e['turns']} turns:"
+            + "\n  " + e["summary"].strip().replace("\n", "\n  ")
+            for e in recalled[:4]
+        )
+        sections.append(
+            "EARLIER CONVERSATIONS\n"
+            "Things you and " + user + " have already discussed, found "
+            "because they look relevant to what was just said. Use them "
+            "as memory: refer back naturally and say when it was. If one "
+            "contradicts what you are being told now, the present "
+            "conversation wins. Do not recite these unprompted."
+            + "\n\n" + earlier
         )
 
     if taint_warning:

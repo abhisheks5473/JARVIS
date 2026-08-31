@@ -88,3 +88,41 @@ def forget_fact(fact_id: int) -> dict:
         f"no stored fact with id {fact_id}",
         hint="call search_memory to find the right id",
     )
+
+
+@tool(group="core", always_available=True)
+def recall_conversations(query: str, limit: int = 4) -> dict:
+    """Search what you and the user talked about in earlier sessions.
+
+    Relevant past conversations are already put in front of you automatically,
+    so reach for this when that was not enough: the user refers to something
+    specific you cannot see, asks what was decided, or asks when something was
+    discussed. Say when it happened, not just what was said.
+
+    Args:
+        query: Words likely to appear in that conversation.
+        limit: How many to return.
+    """
+    if not query.strip():
+        raise ToolError(
+            "no query given", hint="give a word or two from the conversation"
+        )
+
+    found = memory.search_episodes(query, limit=max(1, min(int(limit), 8)))
+    if not found:
+        return {
+            "found": 0,
+            "note": (
+                "nothing matching in earlier sessions -- say so plainly rather "
+                "than guessing at what was discussed"
+            ),
+        }
+
+    return {
+        "found": len(found),
+        "conversations": [
+            {"when": e["when"], "on": e["on"], "turns": e["turns"],
+             "summary": e["summary"]}
+            for e in found
+        ],
+    }

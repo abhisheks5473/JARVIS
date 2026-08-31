@@ -75,6 +75,7 @@ class Agent:
         self.interactive = interactive
         self.started_at = time.time()
         self.turns = 0
+        self._episode_id: int | None = None
         self._summary: str = ""
         # A scheduled job knows which toolset it needs; setting it here keeps
         # that choice local to the agent instead of mutating the registry.
@@ -88,7 +89,7 @@ class Agent:
             pass
 
     # ------------------------------------------------------------ prompt
-    def _system_instruction(self) -> str:
+    def _system_instruction(self, query: str = "") -> str:
         taint_warning = ""
         if self.ledger.is_tainted:
             taint_warning = self.ledger.explain()
@@ -121,8 +122,19 @@ class Agent:
                 "or shown as a notification."
             )
 
+        # Recall is retrieval, not a tool call. The model does not have to
+        # decide to go looking, so a conversation from last week surfaces on
+        # its own -- which is the whole point of remembering it.
+        recalled = []
+        if query.strip():
+            try:
+                recalled = memory.search_episodes(query, limit=3)
+            except Exception:  # noqa: BLE001 - memory must never break a turn
+                recalled = []
+
         return build_system(
             facts=memory.top_facts(40),
+            recalled=recalled,
             taint_warning=taint_warning,
             quota_note=quota_note,
             extra=extra,
@@ -315,6 +327,48 @@ class Agent:
         return payload
 
     # ------------------------------------------------------------ the loop
+    def _checkpoint(self) -> None:
+        """Record the conversation so far, without spending a request on it.
+
+        end_session() writes a proper summary, but only on a clean exit and
+        only after three turns. A crash -- and this app has had them -- lost
+        the entire conversation, which is the opposite of what a memory is
+        for. This keeps a rough record from the second turn onwards, made of
+        what was actually said, and the tidy summary replaces the same row
+        later rather than adding a second one.
+        """
+        if self.turns < 2:
+            return
+        said = []
+        # History is Interactions-API shaped: entries carry a type and a
+        # list of parts, not a role and a string. Reading it as the latter
+        # silently produced nothing at all, and the checkpoint never fired.
+        for entry in self.history[-14:]:
+            kind = entry.get("type")
+            if kind not in ("user_input", "model_output"):
+                continue
+            parts = entry.get("content") or []
+            text = " ".join(
+                part.get("text", "")
+                for part in parts
+                if isinstance(part, dict) and part.get("type") == "text"
+            ).strip()
+            if not text:
+                continue
+            who = "user" if kind == "user_input" else "jarvis"
+            said.append(f"{who}: {text[:220]}")
+        if not said:
+            return
+        try:
+            self._episode_id = memory.save_episode(
+                "(unfinished conversation)\n" + "\n".join(said[-8:]),
+                self.started_at,
+                self.turns,
+                episode_id=self._episode_id,
+            )
+        except Exception:  # noqa: BLE001 - never let bookkeeping break a turn
+            pass
+
     def run(self, user_text: str, tier: ModelTier | None = None) -> TurnReport:
         report = TurnReport()
         turn_started = time.time()
@@ -350,7 +404,7 @@ class Agent:
             thinking=chosen_tier.thinking,
         )
 
-        system_instruction = self._system_instruction()
+        system_instruction = self._system_instruction(user_text)
         declarations = registry.declarations(extra=BUILTIN_TOOLS, names=offered)
         tool_budget = config.MAX_TOOL_CALLS_PER_TURN
         hit_limit = True
@@ -448,12 +502,15 @@ class Agent:
 
         self._emit("reply", text=report.reply, fast_path=False)
         transcript.log_turn(user_text, report)
+        self._checkpoint()
         return report
 
     # ------------------------------------------------------------ lifecycle
     def end_session(self) -> None:
         """Summarise the conversation into long-term memory."""
-        if self.turns < 3:
+        if self.turns < 2:
+            # Below this there is nothing worth a summary, and the checkpoint
+            # from _checkpoint already holds whatever was said.
             return
         try:
             result = client.call(
@@ -463,6 +520,9 @@ class Agent:
                 kind="summary",
                 interactive=False,
             )
-            memory.save_episode(result.text, self.started_at, self.turns)
+            memory.save_episode(
+                result.text, self.started_at, self.turns,
+                episode_id=self._episode_id,
+            )
         except Exception:  # noqa: BLE001 - never block shutdown on this
             pass
