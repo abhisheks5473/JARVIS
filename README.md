@@ -439,7 +439,7 @@ honest as those numbers.
 | **Voice** | Local speech in and out, push-to-talk, and a wake word in your own voice |
 | **The core** | A glowing orb that pulses to the actual audio — green as you speak, blue as it answers |
 
-63 tools in total. It is never offered all of them at once — see below.
+64 tools in total. It is never offered all of them at once — see below.
 
 ### What runs where
 
@@ -672,6 +672,11 @@ tree walk over an ordinary page returns zero nodes. The clipboard is put back
 afterwards. Gmail and Drive draw their content in a way that copying cannot
 reach, so `read_page` detects that and says so rather than reporting an empty
 inbox — use `see_screen` for those, which is what the eyes are for.
+
+`browser_open` takes any address at all, not just the Google services --
+a site, a local file, or a browser page like `chrome://dino`. It returns the
+title the browser actually settled on, so a navigation that went somewhere
+else is visible rather than assumed.
 
 `write_email` fills the compose form and leaves a draft. It sends only when
 asked, and it is in the destructive tier so a tainted conversation cannot send
@@ -959,7 +964,7 @@ jarvis/
 │   ├── taint.py       injection detection and the taint ledger
 │   ├── approval.py    four-layer gate, secret redaction
 │   └── trash.py       deletion you can take back
-├── tools/             63 tools, schemas generated from type hints
+├── tools/             64 tools, schemas generated from type hints
 ├── memory/            SQLite + FTS5
 ├── voice/             faster-whisper in, Piper out, wake word, push-to-talk
 ├── triggers/          scheduled and event-driven autonomy

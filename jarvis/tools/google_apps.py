@@ -465,6 +465,46 @@ def write_email(to: str, subject: str, body: str, send: bool = False) -> dict:
 
 
 @tool(group="google")
+def browser_open(url: str) -> dict:
+    """Open any web address in the browser, and say what actually loaded.
+
+    open_google only knows a fixed list of Google services. This takes any
+    address at all -- a site, a local page, or a browser page such as
+    chrome://dino -- which is what "open X and do Y on it" almost always
+    needs.
+
+    It returns the page title the browser settled on. Check that before
+    reporting success: asking for a page and getting a different one is
+    ordinary, and saying it worked without looking is how a navigation that
+    failed gets reported as one that worked.
+
+    Args:
+        url: Where to go, e.g. "chrome://dino" or "wikipedia.org".
+    """
+    if not url.strip():
+        raise ToolError("no address given", hint="say where to go")
+
+    target = url.strip()
+    # A bare domain is an address to a person and a search term to a browser.
+    if not target.startswith(("http://", "https://", "chrome://", "edge://",
+                              "about:", "file://", "localhost")):
+        target = "https://" + target
+
+    before = _title(_browser_window())
+    title = _navigate(target)
+
+    return {
+        "asked_for": target,
+        "page": title,
+        "changed": title != before,
+        "note": (
+            "this is the window title the browser settled on -- report what it "
+            "actually shows rather than assuming the page that was asked for"
+        ),
+    }
+
+
+@tool(group="google")
 def browser_page() -> dict:
     """Say which page the browser is on, without reading it.
 

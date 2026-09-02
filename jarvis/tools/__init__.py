@@ -88,6 +88,10 @@ PROFILES: dict[str, set[str]] = {
         "send_notification", "see_screen",
         "system_stats", "list_processes",
         "screen_info", "click_mouse", "press_keys",
+        # It could launch Chrome and send key combinations, but had no way to
+        # type an address -- so "open chrome and play the dinosaur game"
+        # opened Chrome, could not reach the page, and said it had.
+        "browser_open", "browser_page", "type_text",
     },
     # Point-and-click work. see_screen is the important one here: clicking
     # without looking first is how an agent hits the wrong button.
@@ -115,6 +119,7 @@ PROFILES: dict[str, set[str]] = {
     # because a web page always needs something clicked that no URL reaches.
     "google": {
         "open_google", "read_page", "write_email", "browser_page",
+        "browser_open",
         "see_screen", "click_mouse", "type_text", "press_keys",
         "scroll_mouse", "launch_app",
     },
