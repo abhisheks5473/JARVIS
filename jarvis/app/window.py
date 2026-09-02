@@ -155,6 +155,10 @@ class JarvisWindow(ctk.CTk):
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(3, weight=1)
 
+        # Column 2 is the command panel, spanning every row beside the
+        # content. Columns 0 and 1 keep the transcript and its scrollbar.
+        self._build_command_panel()
+
         header = ctk.CTkFrame(self, fg_color=PANEL, corner_radius=0, height=54)
         header.grid(row=0, column=0, columnspan=2, sticky="ew")
         header.grid_propagate(False)
@@ -302,6 +306,153 @@ class JarvisWindow(ctk.CTk):
         )
 
     # ------------------------------------------------------------ writing
+    # ------------------------------------------------------- command panel
+    def _build_command_panel(self) -> None:
+        """Every slash command, with a confirm step before any of them runs.
+
+        Clicking a command does not run it. It explains what the command does
+        and waits, because several of these change something -- clearing the
+        injection flag, replacing a wake word recording -- and a column of
+        one-click buttons for those is a column of ways to do them by
+        accident.
+        """
+        from .commands import COMMANDS
+
+        self._panel_open = True
+        self._confirm = None
+        self.panel = ctk.CTkFrame(self, fg_color=PANEL, corner_radius=0, width=272)
+        self.panel.grid(row=0, column=2, rowspan=6, sticky="ns")
+        self.panel.grid_propagate(False)
+
+        top = ctk.CTkFrame(self.panel, fg_color="transparent")
+        top.pack(fill="x", padx=14, pady=(16, 6))
+        ctk.CTkLabel(
+            top, text="Commands", font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=TEXT,
+        ).pack(side="left")
+        ctk.CTkButton(
+            top, text="Hide", width=48, height=24, fg_color="transparent",
+            hover_color=LINE, text_color=MUTED, font=ctk.CTkFont(size=11),
+            command=self.toggle_command_panel,
+        ).pack(side="right")
+
+        self._panel_list = ctk.CTkScrollableFrame(
+            self.panel, fg_color="transparent", width=232,
+        )
+        self._panel_list.pack(fill="both", expand=True, padx=8, pady=(0, 10))
+
+        for command in COMMANDS:
+            row = ctk.CTkFrame(self._panel_list, fg_color=FIELD, corner_radius=8)
+            row.pack(fill="x", pady=3, padx=2)
+            ctk.CTkButton(
+                row, text=command.name, anchor="w", height=26,
+                fg_color="transparent", hover_color=LINE, text_color=ACCENT,
+                font=ctk.CTkFont(family="Consolas", size=12),
+                command=lambda c=command: self._ask_run(c),
+            ).pack(fill="x", padx=6, pady=(6, 0))
+            ctk.CTkLabel(
+                row, text=command.summary, anchor="w", justify="left",
+                wraplength=192, text_color=MUTED, font=ctk.CTkFont(size=10),
+            ).pack(fill="x", padx=12, pady=(0, 7))
+
+        # The handle that brings it back, shown only while it is hidden.
+        self.panel_handle = ctk.CTkButton(
+            self, text="/", width=28, height=28, corner_radius=14,
+            fg_color=FIELD, hover_color=LINE, text_color=ACCENT,
+            font=ctk.CTkFont(size=14, weight="bold"),
+            command=self.toggle_command_panel,
+        )
+
+    def toggle_command_panel(self) -> None:
+        if self._panel_open:
+            self._close_confirm()
+            self.panel.grid_remove()
+            self.panel_handle.place(relx=1.0, y=66, anchor="ne", x=-12)
+        else:
+            self.panel_handle.place_forget()
+            self.panel.grid()
+        self._panel_open = not self._panel_open
+
+    def _ask_run(self, command) -> None:
+        """Explain the command and wait, rather than running it."""
+        self._close_confirm()
+
+        self._confirm = ctk.CTkFrame(self.panel, fg_color=FIELD, corner_radius=8)
+        self._confirm.pack(fill="x", side="bottom", padx=8, pady=(0, 12))
+
+        ctk.CTkLabel(
+            self._confirm, text=command.name, anchor="w",
+            font=ctk.CTkFont(family="Consolas", size=13, weight="bold"),
+            text_color=ACCENT,
+        ).pack(fill="x", padx=12, pady=(10, 4))
+        ctk.CTkLabel(
+            self._confirm, text=command.detail, anchor="w", justify="left",
+            wraplength=210, text_color=TEXT, font=ctk.CTkFont(size=11),
+        ).pack(fill="x", padx=12)
+
+        if command.caution:
+            ctk.CTkLabel(
+                self._confirm, text=command.caution, anchor="w", justify="left",
+                wraplength=210, text_color=WARN, font=ctk.CTkFont(size=11),
+            ).pack(fill="x", padx=12, pady=(6, 0))
+
+        entry = None
+        if command.takes_argument:
+            entry = ctk.CTkEntry(
+                self._confirm, height=32, fg_color=PANEL, border_color=LINE,
+                text_color=TEXT, placeholder_text=command.argument,
+                font=ctk.CTkFont(size=12),
+            )
+            entry.pack(fill="x", padx=12, pady=(8, 0))
+            entry.bind("<Return>", lambda _e: run())
+            # Focus after a beat, but only if the box still exists. Clicking a
+            # second command inside 80ms destroys this one first, and Tk
+            # answers a focus call on a dead widget with a TclError from
+            # inside its own callback, where nothing here can catch it.
+            self.after(
+                80, lambda: entry.winfo_exists() and entry.focus_set()
+            )
+            if command.example:
+                ctk.CTkLabel(
+                    self._confirm, text=f"e.g. {command.example}", anchor="w",
+                    text_color=MUTED,
+                    font=ctk.CTkFont(family="Consolas", size=10),
+                ).pack(fill="x", padx=12, pady=(3, 0))
+
+        def run() -> None:
+            typed = command.name
+            if entry is not None and entry.get().strip():
+                typed = f"{command.name} {entry.get().strip()}"
+            self._close_confirm()
+            # Put it in the box and submit, rather than calling the handler
+            # directly. Everything that happens when a command is typed by
+            # hand -- the busy check, the echo, the clearing of the box --
+            # then happens here too, because it is literally the same path.
+            self.entry.delete(0, "end")
+            self.entry.insert(0, typed)
+            self._submit()
+
+        buttons = ctk.CTkFrame(self._confirm, fg_color="transparent")
+        buttons.pack(fill="x", padx=12, pady=10)
+        ctk.CTkButton(
+            buttons, text="Cancel", width=70, height=30,
+            fg_color="transparent", hover_color=PANEL, text_color=MUTED,
+            border_width=1, border_color=LINE, font=ctk.CTkFont(size=11),
+            command=self._close_confirm,
+        ).pack(side="right")
+        ctk.CTkButton(
+            buttons, text="Run", width=70, height=30,
+            fg_color=ALARM if command.caution else ACCENT,
+            hover_color="#c9302c" if command.caution else "#1f6feb",
+            text_color=TEXT if command.caution else "#04121f",
+            font=ctk.CTkFont(size=11, weight="bold"), command=run,
+        ).pack(side="right", padx=(0, 8))
+
+    def _close_confirm(self) -> None:
+        if getattr(self, "_confirm", None) is not None:
+            self._confirm.destroy()
+            self._confirm = None
+
     def _write(self, text: str, tag: str = "jarvis") -> None:
         self.view.configure(state="normal")
         self.view.insert("end", text + "\n", tag)
@@ -591,7 +742,9 @@ class JarvisWindow(ctk.CTk):
             self.bridge.speak_replies = not self.bridge.speak_replies
             self._write(f"Speaking replies: {self.bridge.speak_replies}", "muted")
         else:
-            self._write("Commands: /clear /quota /memory /voice /wake /key /quit", "muted")
+            from .commands import help_line
+
+            self._write(help_line(), "muted")
 
     def _set_busy(self, busy: bool) -> None:
         self.send_button.configure(state="disabled" if busy else "normal")
