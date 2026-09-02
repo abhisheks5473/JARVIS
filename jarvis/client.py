@@ -107,11 +107,16 @@ class GeminiClient:
 
     def __init__(self) -> None:
         self._client: genai.Client | None = None
+        # One Gemini SDK per key. Routing can send consecutive calls to
+        # different providers, and a single cached client would carry the
+        # wrong key the moment it did.
+        self._by_provider: dict = {}
         self.last_error: str = ""
 
     def reset(self) -> None:
-        """Forget the cached SDK client, after the provider or key changed."""
+        """Forget the cached SDK clients, after a provider or key changed."""
         self._client = None
+        self._by_provider.clear()
 
     # ------------------------------------------------------------ lifecycle
     @property
@@ -126,6 +131,33 @@ class GeminiClient:
             # the failure mode obvious when .env has not been loaded.
             self._client = genai.Client(api_key=os.environ[config.API_KEY_ENV])
         return self._client
+
+    def _sdk_for(self, provider):
+        """The Gemini SDK holding this particular provider's key."""
+        cached = self._by_provider.get(provider.key)
+        if cached is not None:
+            return cached
+        key = providers.key_for(provider)
+        if not key:
+            raise RuntimeError(
+                f"{provider.env_var} is not set, so {provider.label} cannot "
+                "answer. Add its key with the Key button, or untag it."
+            )
+        made = genai.Client(api_key=key)
+        self._by_provider[provider.key] = made
+        return made
+
+    def _model_for(self, provider, tier: ModelTier) -> ModelTier:
+        """The tier, expressed in a model this provider actually has.
+
+        Model ids are not portable: sending gemini-3.5-flash-lite to Groq
+        fails in a way that reads as a broken key. The rung is kept and the
+        name comes from the provider being used.
+        """
+        if provider.key == providers.active_name():
+            return tier          # config.Models already tracks the selected one
+        name = provider.fast if tier.cost <= 1 else provider.smart
+        return ModelTier(name, tier.thinking, tier.cost)
 
     # ------------------------------------------------------------ degrade
     def _effective_tier(self, tier: ModelTier, mode: Mode) -> tuple[ModelTier, bool]:
@@ -155,6 +187,7 @@ class GeminiClient:
         max_output_tokens: int | None = None,
         stream: bool = False,
         max_attempts: int = 5,
+        provider: str | None = None,
     ) -> Any:
         """One metered, retried, quota-aware call.
 
@@ -182,7 +215,12 @@ class GeminiClient:
         # Everything above -- the governor, the degradation ladder -- applies
         # whoever answers. Only the wire format below differs, so the other
         # providers branch off here rather than duplicating any of it.
-        protocol = providers.active().kind
+        chosen = providers.get(provider) if provider else providers.active()
+        if chosen is None:
+            chosen = providers.active()
+        effective = self._model_for(chosen, effective)
+
+        protocol = chosen.kind
         if protocol != "gemini":
             return self._call_foreign(
                 protocol=protocol,
@@ -193,6 +231,7 @@ class GeminiClient:
                 tools=tools,
                 kind=kind,
                 max_output_tokens=max_output_tokens,
+                provider=chosen,
             )
 
         generation_config: dict[str, Any] = {
@@ -228,7 +267,7 @@ class GeminiClient:
 
         for attempt in range(max_attempts):
             try:
-                response = self.sdk.interactions.create(**body)
+                response = self._sdk_for(chosen).interactions.create(**body)
             except errors.APIError as exc:
                 code = getattr(exc, "code", None)
                 # A 429 counted against the per-minute window even though it
@@ -333,10 +372,10 @@ class GeminiClient:
 
     def _call_foreign(
         self, protocol, effective, degraded, input, system_instruction,
-        tools, kind, max_output_tokens,
+        tools, kind, max_output_tokens, provider=None,
     ) -> CallResult:
         """One call to a provider that does not speak Interactions."""
-        provider = providers.active()
+        provider = provider or providers.active()
         sdk = self._foreign_sdk(protocol, provider)
         started = time.time()
 

@@ -201,3 +201,65 @@ def choose_profile(text: str) -> str:
         if pattern.search(topic):
             return name
     return "default"
+
+
+# ---------------------------------------------------------------- category
+# What kind of work a request is, so it can be sent to whichever provider is
+# kept for that kind. Regex rather than a model call, for the same reason the
+# tier and profile choices are: asking a model which model to ask would spend
+# a request to save a request.
+#
+# Order matters. A question can be about several things at once, and the more
+# specific reading wins -- "write a python script to price options" is
+# programming, not finance, because the thing being produced is code.
+_CATEGORY_SIGNALS: list[tuple[str, str]] = [
+    ("programming",
+     r"\b(code|coding|program|programming|function|class|variable|debug|"
+     r"bug|refactor|compile|syntax|regex|api|endpoint|database|sql|query|"
+     r"python|javascript|typescript|java|rust|golang|c\+\+|html|css|"
+     r"git|repo|commit|stack trace|traceback|exception|unit test|algorithm|"
+     r"script|library|framework|deploy|docker|kubernetes)\b"),
+    ("maths",
+     r"\b(calculate|equation|integral|derivative|matrix|algebra|calculus|"
+     r"probability|theorem|proof|geometry|arithmetic|solve for|factorial|"
+     r"logarithm|sum of|multiply|divide)\b"),
+    ("finance",
+     r"\b(invest|investment|stock|shares|portfolio|market|trading|revenue|"
+     r"profit|margin|tax|budget|salary|loan|mortgage|interest rate|"
+     r"valuation|cash flow|balance sheet|expense|accounting|crypto|"
+     r"inflation|dividend|savings|fund|etf|pension|retirement|debt|"
+     r"bonds|equity|asset|bank|net worth|compound interest)\b"),
+    ("science",
+     r"\b(physics|chemistry|biology|molecule|atom|protein|dna|genome|"
+     r"quantum|thermodynamic|evolution|species|neuron|enzyme|reaction|"
+     r"hypothesis|experiment|astronomy|planet|galaxy|climate|geology|"
+     r"photosynthesis|cell|organism|mitochondria|bacteria|virus|"
+     r"gravity|orbit|element|compound|catalyst|ecosystem|fossil)\b"),
+    ("roleplay",
+     r"\b(roleplay|role.play|pretend to be|act as|in character|"
+     r"you are now a|persona|story about|write a story|dialogue between|"
+     r"improvise|fictional)\b"),
+    ("writing",
+     r"\b(write|draft|rewrite|edit|proofread|essay|article|blog|poem|"
+     r"letter|email|caption|headline|summar|paraphrase|translate|tone)\b"),
+    ("research",
+     r"\b(research|find out|look up|compare|sources|evidence|study|"
+     r"according to|latest|news|who is|what is the difference)\b"),
+]
+
+_CATEGORY_PATTERNS = [
+    (name, re.compile(pattern, re.I)) for name, pattern in _CATEGORY_SIGNALS
+]
+
+
+def categorise(text: str) -> str:
+    """What kind of work this is. "general" when nothing specific matches."""
+    if not text or not text.strip():
+        return "general"
+    # Filenames carry extensions that read as topics; strip them first, the
+    # same way profile matching does.
+    topic = _FILENAME.sub(" ", text)
+    for name, pattern in _CATEGORY_PATTERNS:
+        if pattern.search(topic):
+            return name
+    return "general"

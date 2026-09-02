@@ -83,8 +83,10 @@ PROVIDERS: dict[str, Provider] = {
         console_url="https://console.groq.com/keys",
         key_hint="starts with gsk_",
         base_url="https://api.groq.com/openai/v1",
-        fast="llama-3.1-8b-instant",
-        smart="llama-3.3-70b-versatile",
+        # Asked the API rather than trusting a list: the llama-3.x ids that
+        # were here returned 404 "does not exist or you do not have access".
+        fast="openai/gpt-oss-20b",
+        smart="openai/gpt-oss-120b",
         prefixes=("gsk_",),
         notes="Free tier with rate limits.",
     ),
@@ -261,3 +263,112 @@ def save_choice(provider_name: str, api_key: str = "", env_file=None) -> str:
         os.environ[provider.env_var] = key
     config.refresh()
     return ""
+
+
+# ------------------------------------------------------------------ routing
+# What a provider is kept for. Several can be configured at once, each tagged
+# with the kinds of work it is good at, and the router sends each request to
+# whichever claims that kind. A provider with no tags is a general fallback.
+CATEGORIES = (
+    "programming",
+    "science",
+    "finance",
+    "writing",
+    "roleplay",
+    "maths",
+    "research",
+    "general",
+)
+
+
+def categories_for(provider: Provider | None = None) -> set[str]:
+    """Which kinds of work this provider is tagged for."""
+    provider = provider or active()
+    raw = os.getenv(f"JARVIS_ROUTE_{provider.key.upper()}", "")
+    return {c.strip().lower() for c in raw.split(",") if c.strip()}
+
+
+def configured() -> list[Provider]:
+    """Providers that could actually answer a request.
+
+    A key is the evidence for a hosted service. For one that runs on this
+    machine there is no key to check, and "installed" is not the same as
+    "running" -- so those count only once they have been tagged for something,
+    which is the user saying they want them used. Routing work to an Ollama
+    that was never started would be worse than not routing at all.
+    """
+    usable = []
+    for provider in PROVIDERS.values():
+        if provider.needs_key:
+            if key_present(provider):
+                usable.append(provider)
+        elif categories_for(provider):
+            usable.append(provider)
+    return usable
+
+
+def best_for(category: str) -> Provider:
+    """The provider tagged for this kind of work, or the selected one.
+
+    Falls back rather than failing, and falls back to the provider the user
+    chose rather than to an arbitrary one: an unrouted question should behave
+    exactly as it did before any of this existed.
+    """
+    category = (category or "").strip().lower()
+    usable = configured()
+    if category:
+        for provider in usable:
+            if category in categories_for(provider):
+                return provider
+    fallback = active()
+    if key_present(fallback):
+        return fallback
+    return usable[0] if usable else fallback
+
+
+def set_categories(provider_name: str, categories, env_file=None) -> str:
+    """Tag a provider with the work it should be given. "" on success."""
+    provider = get(provider_name)
+    if provider is None:
+        return f"Unknown provider: {provider_name}"
+
+    chosen = sorted({
+        c.strip().lower() for c in categories
+        if c.strip().lower() in CATEGORIES
+    })
+
+    from . import config
+
+    target = env_file or config.ENV_FILE
+    values = _read_env(target)
+    name = f"JARVIS_ROUTE_{provider.key.upper()}"
+    if chosen:
+        values[name] = ",".join(chosen)
+        os.environ[name] = ",".join(chosen)
+    else:
+        values.pop(name, None)
+        os.environ.pop(name, None)
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            "# Written by JARVIS. Keep this file private." + chr(10)
+            + chr(10).join(f"{k}={v}" for k, v in values.items()) + chr(10),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        return f"Could not save: {exc}"
+    return ""
+
+
+def routing_table() -> list[dict]:
+    """Every configured provider and what it is tagged for, for display."""
+    return [
+        {
+            "provider": p.key,
+            "label": p.label,
+            "model": p.fast,
+            "categories": sorted(categories_for(p)) or ["(untagged)"],
+        }
+        for p in configured()
+    ]

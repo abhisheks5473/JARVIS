@@ -116,6 +116,33 @@ class ProviderDialog(ctk.CTkToplevel):
             command=self._open_console,
         ).pack(side="left", padx=(12, 0))
 
+        ctk.CTkLabel(
+            self, text="Good at", font=ctk.CTkFont(size=13, weight="bold"),
+            text_color=TEXT,
+        ).pack(anchor="w", padx=22, pady=(18, 2))
+        ctk.CTkLabel(
+            self,
+            text=("Tick what this provider should be given. Questions are "
+                  "sorted into these and sent to whichever provider claims "
+                  "them, switching as a task changes subject. Untagged means "
+                  "general fallback."),
+            font=ctk.CTkFont(size=11), text_color=MUTED,
+            wraplength=560, justify="left",
+        ).pack(anchor="w", padx=22, pady=(0, 6))
+
+        grid = ctk.CTkFrame(self, fg_color="transparent")
+        grid.pack(anchor="w", padx=20)
+        self.category_boxes = {}
+        for index, name in enumerate(providers.CATEGORIES):
+            box = ctk.CTkCheckBox(
+                grid, text=name, text_color=MUTED, fg_color=ACCENT,
+                hover_color=ACCENT, checkbox_width=17, checkbox_height=17,
+                font=ctk.CTkFont(size=11),
+            )
+            box.grid(row=index // 4, column=index % 4, sticky="w",
+                     padx=6, pady=3)
+            self.category_boxes[name] = box
+
         self.message = ctk.CTkLabel(
             self, text="", font=ctk.CTkFont(size=12), text_color=MUTED,
             wraplength=560, justify="left",
@@ -176,11 +203,26 @@ class ProviderDialog(ctk.CTkToplevel):
                 + ("  -- leave blank to keep it" if existing else ""),
                 text_color=GOOD if existing else MUTED,
             )
+        # Show the tags belonging to whichever provider is now selected,
+        # rather than leaving the previous one's ticks standing.
+        tagged = providers.categories_for(provider)
+        for name, box in getattr(self, "category_boxes", {}).items():
+            box.select() if name in tagged else box.deselect()
+
         self.message.configure(text="")
 
     def _save(self) -> None:
         typed = "" if self.entry.cget("state") == "disabled" else self.entry.get()
         problem = providers.save_choice(self._provider.key, typed.strip())
+        if problem:
+            self.message.configure(text=problem, text_color=ALARM)
+            return
+
+        chosen = [
+            name for name, box in getattr(self, "category_boxes", {}).items()
+            if box.get()
+        ]
+        problem = providers.set_categories(self._provider.key, chosen)
         if problem:
             self.message.configure(text=problem, text_color=ALARM)
             return

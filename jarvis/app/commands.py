@@ -58,6 +58,17 @@ COMMANDS: tuple[Command, ...] = (
         ),
     ),
     Command(
+        name="/route",
+        summary="Which provider gets which kind of question",
+        detail=(
+            "Shows every provider you have a key for, the model it uses, and "
+            "the kinds of work it is tagged for. Questions are sorted into "
+            "those kinds and sent to whichever provider claims them -- and it "
+            "switches again mid-task if the subject changes. Tag them with "
+            "the Key button."
+        ),
+    ),
+    Command(
         name="/wake",
         summary="Record a wake word in your own voice",
         detail=(

@@ -29,13 +29,20 @@ from typing import Any
 from collections.abc import Callable
 
 from . import config
+from . import providers
 from .client import CallResult, ModelBlocked, QuotaExhausted, client
 from .config import ModelTier, Models
 from .logging_setup import transcript
 from .memory.store import memory
 from .prompts import SUMMARY_SYSTEM, build_system
 from .quota import Mode, governor
-from .router import choose_profile, choose_tier, fast_path, required_tools
+from .router import (
+    categorise,
+    choose_profile,
+    choose_tier,
+    fast_path,
+    required_tools,
+)
 from .security.approval import ApprovalGate, Outcome, redact
 from .security.taint import Level, TaintLedger, wrap_untrusted
 from .tools import BUILTIN_TOOLS, profile_tools, registry
@@ -56,6 +63,11 @@ class TurnReport:
     degraded: bool = False
     fast_path: bool = False
     taint_level: str = "CLEAN"
+    # Which provider answered, and why it was chosen. A list because a single
+    # turn can move between them as its subject changes.
+    provider: str = ""
+    category: str = ""
+    providers_used: list[str] = field(default_factory=list)
     error: str = ""
 
 
@@ -369,6 +381,27 @@ class Agent:
         except Exception:  # noqa: BLE001 - never let bookkeeping break a turn
             pass
 
+    def _provider_for_step(self, user_text: str) -> tuple[str, str]:
+        """Which provider should answer the step about to happen.
+
+        The subject of a step is what was asked plus whatever just came back
+        from a tool, so a turn that begins as research and turns into coding
+        moves to whichever provider is kept for coding at the point it turns.
+        Categorising is regex over text; it costs nothing, which is what makes
+        doing it every step reasonable rather than extravagant.
+        """
+        focus = [user_text]
+        for entry in self.history[-3:]:
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("type") == "function_result":
+                for part in entry.get("result") or []:
+                    if isinstance(part, dict) and part.get("text"):
+                        focus.append(str(part["text"])[:400])
+
+        category = categorise(" ".join(focus))
+        return providers.best_for(category).key, category
+
     def run(self, user_text: str, tier: ModelTier | None = None) -> TurnReport:
         report = TurnReport()
         turn_started = time.time()
@@ -418,6 +451,21 @@ class Agent:
                 hit_limit = False
                 break
 
+            # Which provider answers this step. Re-decided every step rather
+            # than once per turn, because a task changes subject as it runs:
+            # "research this then write the script" starts as research and
+            # becomes programming the moment the reading is done.
+            step_provider, step_category = self._provider_for_step(user_text)
+            if step_provider != report.provider:
+                if report.provider:
+                    self._emit(
+                        "provider_switch", to=step_provider,
+                        category=step_category, step=step_index + 1,
+                    )
+                report.provider = step_provider
+                report.category = step_category
+                report.providers_used.append(step_provider)
+
             try:
                 result = client.call(
                     tier=chosen_tier,
@@ -426,6 +474,7 @@ class Agent:
                     tools=declarations,
                     kind="agent",
                     interactive=self.interactive,
+                    provider=step_provider,
                 )
             except QuotaExhausted as exc:
                 report.error = str(exc)

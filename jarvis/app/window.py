@@ -738,6 +738,22 @@ class JarvisWindow(ctk.CTk):
                 self._write(f"  [{fact.id}] {fact.fact}", "tool")
         elif name == "key":
             self.open_provider()
+        elif name == "route":
+            from .. import providers
+
+            table = providers.routing_table()
+            if not table:
+                self._write("No providers configured. Press Key to add one.", "warn")
+            for row in table:
+                self._write(
+                    f"  {row['label']:<22} {row['model']:<26} "
+                    f"{', '.join(row['categories'])}", "tool",
+                )
+            self._write(
+                "  Questions are sorted into those kinds and sent to whichever "
+                "provider claims them, switching again if a task changes "
+                "subject. Tag them with the Key button.", "muted",
+            )
         elif name == "wake":
             parts = raw[1:].split(None, 1)
             argument = parts[1].strip() if len(parts) > 1 else ""

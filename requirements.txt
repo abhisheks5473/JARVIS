@@ -64,3 +64,8 @@ uiautomation>=2.0.20; sys_platform == "win32"   # sees UI inside a WebView
 # pygetwindow can see the screen, the menu bar or other apps' windows.
 pyobjc-framework-Quartz>=10.0; sys_platform == "darwin"
 pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"
+
+# Needed by every OpenAI-compatible provider -- OpenAI, Groq,
+# OpenRouter, Together, Ollama, LM Studio. Routing work across
+# several providers is no longer optional if you configure them.
+openai>=1.40.0
