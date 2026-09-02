@@ -184,6 +184,18 @@ class JarvisWindow(ctk.CTk):
         )
         self.quota_label.pack(side="right", padx=(0, 16))
 
+        # The way back to the command panel. It lives in the header rather
+        # than floating over the window, because a placed widget sits below
+        # anything created after it: the first version put a small handle at
+        # the top right, the stage was built afterwards and covered it, and
+        # hiding the panel became a one-way trip.
+        self.panel_toggle = ctk.CTkButton(
+            header, text="Commands", width=92, height=28, corner_radius=14,
+            fg_color=FIELD, hover_color=LINE, text_color=MUTED,
+            font=ctk.CTkFont(size=11), command=self.toggle_command_panel,
+        )
+        self.panel_toggle.pack(side="right", padx=(0, 16))
+
         self.banner = ctk.CTkFrame(self, fg_color="#3d1518", corner_radius=0)
         self.banner_label = ctk.CTkLabel(
             self.banner, text="", text_color=ALARM, wraplength=900,
@@ -355,23 +367,24 @@ class JarvisWindow(ctk.CTk):
                 wraplength=192, text_color=MUTED, font=ctk.CTkFont(size=10),
             ).pack(fill="x", padx=12, pady=(0, 7))
 
-        # The handle that brings it back, shown only while it is hidden.
-        self.panel_handle = ctk.CTkButton(
-            self, text="/", width=28, height=28, corner_radius=14,
-            fg_color=FIELD, hover_color=LINE, text_color=ACCENT,
-            font=ctk.CTkFont(size=14, weight="bold"),
-            command=self.toggle_command_panel,
-        )
 
     def toggle_command_panel(self) -> None:
         if self._panel_open:
             self._close_confirm()
             self.panel.grid_remove()
-            self.panel_handle.place(relx=1.0, y=66, anchor="ne", x=-12)
         else:
-            self.panel_handle.place_forget()
             self.panel.grid()
         self._panel_open = not self._panel_open
+
+        # The label stays "Commands" -- it is named for what it controls, and
+        # swapping it to "Hide" made it disagree with the panel's own Hide
+        # button at startup. Colour carries the state instead: lit when the
+        # panel is away and clicking it would bring something back.
+        if getattr(self, "panel_toggle", None) is not None:
+            self.panel_toggle.configure(
+                text_color=MUTED if self._panel_open else ACCENT,
+                fg_color=FIELD if self._panel_open else LINE,
+            )
 
     def _ask_run(self, command) -> None:
         """Explain the command and wait, rather than running it."""

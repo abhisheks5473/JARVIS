@@ -685,8 +685,8 @@ waits, and Run then types it into the input box exactly as you would have. The
 commands that change something (clearing the injection flag, replacing a wake
 word recording, quitting) say so and get a red Run button.
 
-**Hide** collapses the panel to a small `/` handle in the corner; clicking that
-brings it back. The list, the descriptions and the help line all come from one
+**Hide** collapses the panel; the **Commands** button in the header lights up
+and brings it back. The list, the descriptions and the help line all come from one
 file, so a command cannot exist without being described.
 
 
